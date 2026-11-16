@@ -1,0 +1,5 @@
+# 本机 Windows 的证书吊销服务器不可达（CRYPT_E_REVOCATION_OFFLINE），
+# 会让 cargo 访问 crates.io 直接失败。这里只对当前项目关闭吊销检查，
+# 不改系统证书设置；其他网络环境可删除本文件。
+[http]
+check-revoke = false

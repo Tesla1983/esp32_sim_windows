@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp32sim desktop</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1d212a;
+    --line: #2a2f3a;
+    --text: #e6eaf2;
+    --muted: #8b93a7;
+    --accent: #378add;
+    --ok: #3ecf8e;
+    --warn: #ef9f27;
+    --err: #e24b4a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  header {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-size: 14px; font-weight: 500; letter-spacing: .2px; }
+  .brand span { color: var(--muted); font-weight: 400; }
+  .status { display: flex; align-items: center; gap: 7px; color: var(--muted); margin-left: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4a5060; }
+  .dot.on { background: var(--ok); }
+  .dot.busy { background: var(--warn); }
+  .dot.err { background: var(--err); }
+  .actions { margin-left: auto; display: flex; gap: 8px; }
+  button {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 7px 16px;
+    cursor: pointer;
+  }
+  button:hover { border-color: #3b4252; background: #232833; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #4b97e8; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.small { padding: 5px 11px; font-size: 12px; }
+  main { height: calc(100% - 52px); display: grid; grid-template-columns: 340px minmax(0, 1fr); }
+  aside {
+    overflow-y: auto;
+    padding: 14px 14px 28px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+  }
+  aside { scrollbar-width: thin; scrollbar-color: #333a47 transparent; }
+  aside::-webkit-scrollbar { width: 10px; }
+  aside::-webkit-scrollbar-track { background: var(--panel); }
+  aside::-webkit-scrollbar-thumb {
+    background: #333a47;
+    border: 2px solid var(--panel);
+    border-radius: 5px;
+  }
+  aside::-webkit-scrollbar-thumb:hover { background: #414a5a; }
+  aside section { margin-bottom: 18px; }
+  aside h3 {
+    margin: 0 0 9px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: .4px;
+  }
+  label { display: block; margin-bottom: 9px; font-size: 12px; color: var(--muted); }
+  input, select {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 7px 9px;
+    font: inherit;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  input[type=checkbox] { width: auto; margin: 0; }
+  .row { display: flex; gap: 6px; margin-top: 4px; }
+  .row input { margin-top: 0; }
+  .row button { flex: 0 0 auto; padding: 7px 12px; }
+  .hint { font-size: 11.5px; color: #6b7385; line-height: 1.5; margin: -3px 0 9px; }
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); margin-bottom: 9px; }
+  .switch input { margin: 0; }
+  /* 日志区 440px（原 220px 的两倍） */
+  #stage { display: grid; grid-template-rows: auto minmax(0, 1fr) 440px; min-width: 0; min-height: 0; }
+  .banner {
+    display: none;
+    grid-row: 1;
+    margin: 10px 14px 0;
+    padding: 9px 13px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .banner.err { border-color: #5a2a2a; background: #2a1a1a; color: #f2b3b3; }
+  .banner.ok { border-color: #24503c; background: #17251f; color: #9fe1cb; }
+  .banner.warn { border-color: #5a4520; background: #2a2216; color: #f5c775; }
+  #boardWrap {
+    grid-row: 2;
+    position: relative;
+    margin: 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #0b0d11;
+    overflow: hidden;
+  }
+  #boardFrame { width: 100%; height: 100%; border: 0; display: none; background: #0b0d11; }
+  #placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+  #placeholder .hint { font-size: 12px; color: #5c6478; max-width: 520px; }
+  #logs {
+    grid-row: 3;
+    margin: 0 14px 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .loghead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .loghead .spacer { flex: 1; }
+  .loghead button { padding: 3px 10px; font-size: 11.5px; }
+  #log {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 8px 12px;
+    overflow-y: scroll;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #3a4152 #12151c;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: #b7c0d0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #log::-webkit-scrollbar { width: 12px; height: 12px; }
+  #log::-webkit-scrollbar-track { background: #12151c; border-radius: 6px; }
+  #log::-webkit-scrollbar-thumb {
+    background: #4a5265;
+    border: 3px solid #12151c;
+    border-radius: 6px;
+  }
+  #log::-webkit-scrollbar-thumb:hover { background: #5a6378; }
+  #log::-webkit-scrollbar-corner { background: #12151c; }
+  #log .ln.err { color: #f09595; }
+  #log .ln.warn { color: #f5c775; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">esp32sim <span>desktop</span></div>
+  <div class="status"><i id="dot" class="dot"></i><span id="statusText">未运行</span></div>
+  <div class="actions">
+    <button id="btnRun" class="primary">运行</button>
+    <button id="btnStop" disabled>停止</button>
+  </div>
+</header>
+<main>
+  <aside>
+    <section>
+      <h3>目标</h3>
+      <label>芯片
+        <select id="chip">
+          <option value="s3" selected>ESP32-S3</option>
+          <option value="esp32">ESP32（经典）</option>
+          <option value="c3">ESP32-C3</option>
+          <option value="c6">ESP32-C6</option>
+          <option value="p4">ESP32-P4</option>
+          <option value="s31">ESP32-S31</option>
+        </select>
+      </label>
+      <label>板子
+        <select id="board">
+          <option value="none" selected>none（裸模块，仅控制台）</option>
+          <option value="atech14">Atech 14 口套件（S3）</option>
+          <option value="waveshare-lcd4b">Waveshare Touch-LCD-4B（S3）</option>
+          <option value="waveshare-amoled18-v2">Waveshare Touch-AMOLED-1.8（S3）</option>
+          <option value="waveshare-cam">ESP32-S3-CAM（S3）</option>
+          <option value="waveshare-c6-lcd147">Waveshare C6-LCD-1.47（C6）</option>
+          <option value="waveshare-p4-lcd35">Waveshare P4-LCD-3.5（P4）</option>
+          <option value="mosaico">ESP-Mosaico（S31）</option>
+          <option value="ttgo-tdisplay">LilyGO T-Display（经典）</option>
+          <option value="cyd">ESP32-2432S028 廉价黄板（经典）</option>
+          <option value="ulanzi-tc001">Ulanzi TC001（经典）</option>
+          <option value="esp32dev">ESP32-DevKitC（经典）</option>
+        </select>
+      </label>
+    </section>
+
+    <section>
+      <h3>固件</h3>
+      <label>build 目录
+        <span class="row">
+          <input id="buildDir" placeholder="项目的 build 目录">
+          <button id="btnDetect">识别</button>
+        </span>
+      </label>
+      <label>bootloader.bin<input id="bootloader"></label>
+      <label>partition-table.bin<input id="ptable"></label>
+      <label>应用镜像 .bin<input id="app"></label>
+      <label>符号 .elf（可选）<input id="elf"></label>
+    </section>
+
+    <section>
+      <h3>ROM</h3>
+      <label>mask ROM .elf
+        <span class="row">
+          <input id="romPath" placeholder="留空自动查找">
+          <button id="btnFindRom">查找</button>
+        </span>
+      </label>
+      <div class="hint">自动查找顺序：环境变量 ESP32SIM_ROM_DIR → 项目 roms/ → ESP-IDF 的 ~/.espressif/tools/esp-rom-elfs。</div>
+    </section>
+
+    <section>
+      <h3>模块</h3>
+      <label>Flash（MB）<input id="flashMb" type="number" min="1" max="32" value="16"></label>
+      <label>PSRAM（MB）<input id="psramMb" type="number" min="0" max="32" value="8"></label>
+    </section>
+
+    <section>
+      <h3>网络</h3>
+      <label>WiFi SSID（可选）<input id="wifiSsid" placeholder="留空则不启用"></label>
+      <label>WiFi 密码<input id="wifiPsk" type="password"></label>
+    </section>
+
+    <section>
+      <h3>输出（可选）</h3>
+      <label>屏幕截图 PNG<input id="tftPng" placeholder="例如 out/tft.png"></label>
+      <label>音频 WAV<input id="wav" placeholder="例如 out/audio.wav"></label>
+      <label>GPIO 波形 VCD<input id="vcd" placeholder="例如 out/gpio.vcd"></label>
+      <button id="btnOpenOut" class="small">打开输出目录</button>
+    </section>
+
+    <section>
+      <h3>自动化</h3>
+      <label class="switch"><input id="autoWatch" type="checkbox"> build 变化时自动重启</label>
+      <div class="hint">开启后会监视 build 目录；固件重新生成即自动重跑，防抖 700 ms。</div>
+    </section>
+
+    <section>
+      <h3>工程</h3>
+      <div class="row">
+        <button id="btnSaveProject" class="small">保存工程</button>
+        <button id="btnLoadProject" class="small">加载工程</button>
+      </div>
+    </section>
+  </aside>
+
+  <section id="stage">
+    <div id="banner" class="banner"></div>
+    <div id="boardWrap">
+      <iframe id="boardFrame" title="board"></iframe>
+      <div id="placeholder">
+        <div>配置固件后点击「运行」</div>
+        <div class="hint">首次使用需要 mask ROM：放到项目 roms/ 目录，或让程序从 ESP-IDF 的 esp-rom-elfs 目录自动查找。</div>
+      </div>
+    </div>
+    <div id="logs">
+      <div class="loghead">
+        <span>串口 / 日志</span>
+        <span class="spacer"></span>
+        <button id="btnSaveLog" class="small">另存</button>
+        <button id="btnClear" class="small">清空</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const tauri = window.__TAURI__ || {};
+  const invoke = tauri.core ? tauri.core.invoke : async () => { throw new Error("未在 Tauri 环境中运行"); };
+  const listen = tauri.event ? tauri.event.listen : async () => () => {};
+
+  const fields = ["chip", "board", "buildDir", "bootloader", "ptable", "app", "elf", "romPath",
+                  "flashMb", "psramMb", "wifiSsid", "wifiPsk", "tftPng", "wav", "vcd"];
+  const storeKey = "esp32sim-desktop.config";
+  let running = false;
+  let restarting = false;
+  let currentPort = 0;
+  let bannerTimer = 0;
+
+  function saveConfig() {
+    const cfg = collect();
+    localStorage.setItem(storeKey, JSON.stringify(cfg));
+  }
+  function loadConfig() {
+    try {
+      const cfg = JSON.parse(localStorage.getItem(storeKey) || "{}");
+      fields.forEach((k) => { if (cfg[k] != null) $(k).value = cfg[k]; });
+      if (cfg.autoWatch) $("autoWatch").checked = true;
+    } catch (_) {}
+  }
+  function collect() {
+    return {
+      chip: $("chip").value,
+      board: $("board").value,
+      buildDir: $("buildDir").value.trim(),
+      bootloader: $("bootloader").value.trim(),
+      ptable: $("ptable").value.trim(),
+      app: $("app").value.trim(),
+      elf: $("elf").value.trim(),
+      romPath: $("romPath").value.trim(),
+      flashMb: $("flashMb").value,
+      psramMb: $("psramMb").value,
+      wifiSsid: $("wifiSsid").value.trim(),
+      wifiPsk: $("wifiPsk").value,
+      tftPng: $("tftPng").value.trim(),
+      wav: $("wav").value.trim(),
+      vcd: $("vcd").value.trim(),
+      autoWatch: $("autoWatch").checked,
+    };
+  }
+  function applyConfig(cfg) {
+    fields.forEach((k) => { if (cfg[k] != null) $(k).value = cfg[k]; });
+    $("autoWatch").checked = !!cfg.autoWatch;
+  }
+  fields.forEach((k) => $(k).addEventListener("change", saveConfig));
+  $("autoWatch").addEventListener("change", () => {
+    saveConfig();
+    if ($("autoWatch").checked) {
+      startWatch();
+    } else {
+      invoke("stop_watch").catch(() => {});
+    }
+  });
+
+  function setStatus(text, kind) {
+    $("statusText").textContent = text;
+    $("dot").className = "dot" + (kind ? " " + kind : "");
+  }
+  function banner(msg, kind) {
+    const b = $("banner");
+    b.textContent = msg;
+    b.className = "banner " + (kind || "");
+    b.style.display = "block";
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { b.style.display = "none"; }, 6000);
+  }
+  function classify(line) {
+    if (/(^|\s)(E \(|error|Error|failed|panic|Guru Meditation)/.test(line)) return "ln err";
+    if (/(^|\s)(W \(|warn|Warning)/.test(line)) return "ln warn";
+    return "ln";
+  }
+  function appendLog(text) {
+    const box = $("log");
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+    const parts = String(text).split(/\r?\n/);
+    for (const line of parts) {
+      if (!line) continue;
+      const d = document.createElement("div");
+      d.className = classify(line);
+      d.textContent = line;
+      box.appendChild(d);
+    }
+    while (box.childElementCount > 5000) box.removeChild(box.firstChild);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  async function startWatch() {
+    const dir = $("buildDir").value.trim();
+    if (!dir) return;
+    try {
+      await invoke("start_watch", { dir });
+      appendLog("[desktop] 已开始监视 build 目录\n");
+    } catch (e) {
+      banner("无法监视 build 目录：" + e, "warn");
+    }
+  }
+
+  async function waitReady(port, timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        await fetch("http://127.0.0.1:" + port + "/", { mode: "no-cors", cache: "no-store" });
+        return true;
+      } catch (_) {
+        await new Promise((r) => setTimeout(r, 400));
+      }
+    }
+    return false;
+  }
+
+  async function startSim() {
+    if (running) await stopSim(true);
+    const cfg = {
+      chip: $("chip").value,
+      board: $("board").value,
+      bootloader: $("bootloader").value.trim(),
+      ptable: $("ptable").value.trim(),
+      app: $("app").value.trim(),
+      elf: $("elf").value.trim() || null,
+      rom: $("romPath").value.trim() || null,
+      flashMb: Number($("flashMb").value) || null,
+      psramMb: Number($("psramMb").value) || null,
+      wifiSsid: $("wifiSsid").value.trim() || null,
+      wifiPsk: $("wifiPsk").value || null,
+      tftPng: $("tftPng").value.trim() || null,
+      wav: $("wav").value.trim() || null,
+      vcd: $("vcd").value.trim() || null,
+    };
+    if (!cfg.bootloader || !cfg.ptable || !cfg.app) {
+      banner("先选择 build 目录并点「识别」，补全 bootloader / 分区表 / 应用镜像。", "err");
+      return false;
+    }
+
+    $("btnRun").disabled = true;
+    setStatus("启动中", "busy");
+    try {
+      const port = await invoke("start_sim", { cfg });
+      currentPort = port;
+      running = true;
+      appendLog("[desktop] 仿真进程已启动，端口 " + port + "\n");
+      const ok = await waitReady(port, 20000);
+      if (!ok) throw new Error("board 服务在 20 秒内未就绪");
+      $("placeholder").style.display = "none";
+      $("boardFrame").style.display = "block";
+      $("boardFrame").src = "http://127.0.0.1:" + port + "/?embed=1";
+      $("btnStop").disabled = false;
+      $("btnRun").disabled = false;   // 运行中允许再次点击：内部会先停旧进程
+      setStatus("运行中", "on");
+      if ($("autoWatch").checked) await startWatch();
+      return true;
+    } catch (e) {
+      running = false;
+      appendLog("[desktop] 启动失败：" + e + "\n");
+      banner(String(e), "err");
+      setStatus("启动失败", "err");
+      $("btnRun").disabled = false;
+      $("btnStop").disabled = true;
+      return false;
+    }
+  }
+
+  async function stopSim(silent) {
+    try { await invoke("stop_sim"); } catch (_) {}
+    running = false;
+    currentPort = 0;
+    $("boardFrame").src = "about:blank";
+    $("boardFrame").style.display = "none";
+    $("placeholder").style.display = "flex";
+    $("btnRun").disabled = false;
+    $("btnStop").disabled = true;
+    if (!silent) {
+      setStatus("已停止");
+      appendLog("[desktop] 已停止\n");
+    }
+  }
+
+  $("btnRun").addEventListener("click", () => startSim());
+  $("btnStop").addEventListener("click", () => stopSim(false));
+
+  $("btnDetect").addEventListener("click", async () => {
+    const dir = $("buildDir").value.trim();
+    if (!dir) return;
+    try {
+      const r = await invoke("detect_build_dir", { dir });
+      if (r.bootloader) $("bootloader").value = r.bootloader;
+      if (r.ptable) $("ptable").value = r.ptable;
+      if (r.app) $("app").value = r.app;
+      if (r.elf) $("elf").value = r.elf;
+      saveConfig();
+      const missing = ["bootloader", "ptable", "app"].filter((k) => !r[k]);
+      if (missing.length) {
+        banner("识别完成，但缺少：" + missing.join(" / ") + "。请确认这是 ESP-IDF 的 build 目录。", "warn");
+      } else {
+        appendLog("[desktop] 已识别 build 目录\n");
+        banner("已识别三件套。", "ok");
+      }
+    } catch (e) {
+      banner("识别失败：" + e, "err");
+    }
+  });
+
+  $("btnFindRom").addEventListener("click", async () => {
+    try {
+      const rom = await invoke("detect_rom", { chip: $("chip").value });
+      if (rom) {
+        $("romPath").value = rom;
+        saveConfig();
+        appendLog("[desktop] 找到 ROM：" + rom + "\n");
+        banner("已找到 ROM：" + rom, "ok");
+      } else {
+        banner("没有找到对应芯片的 ROM。请把 .elf 放进 roms/ 目录，或手动填路径。", "warn");
+      }
+    } catch (e) {
+      banner("查找 ROM 失败：" + e, "err");
+    }
+  });
+
+  $("btnClear").addEventListener("click", () => { $("log").textContent = ""; });
+
+  $("btnSaveLog").addEventListener("click", async () => {
+    try {
+      const dir = await invoke("app_data_dir");
+      const p = dir + "/last-run.log";
+      await invoke("write_text", { path: p, content: $("log").innerText });
+      banner("日志已保存：" + p, "ok");
+    } catch (e) {
+      banner("保存日志失败：" + e, "err");
+    }
+  });
+
+  $("btnOpenOut").addEventListener("click", async () => {
+    const p = $("tftPng").value.trim() || $("wav").value.trim() || $("vcd").value.trim() || $("buildDir").value.trim();
+    if (!p) { banner("还没有输出路径或 build 目录。", "warn"); return; }
+    try {
+      await invoke("open_path", { path: p });
+    } catch (e) {
+      banner("打开失败：" + e, "err");
+    }
+  });
+
+  $("btnSaveProject").addEventListener("click", async () => {
+    try {
+      const dir = await invoke("app_data_dir");
+      const p = dir + "/project.json";
+      await invoke("write_text", { path: p, content: JSON.stringify(collect(), null, 2) });
+      banner("工程已保存：" + p, "ok");
+    } catch (e) {
+      banner("保存工程失败：" + e, "err");
+    }
+  });
+
+  $("btnLoadProject").addEventListener("click", async () => {
+    try {
+      const dir = await invoke("app_data_dir");
+      const p = dir + "/project.json";
+      const text = await invoke("read_text", { path: p });
+      applyConfig(JSON.parse(text));
+      saveConfig();
+      banner("工程已加载：" + p, "ok");
+    } catch (e) {
+      banner("加载工程失败：" + e, "err");
+    }
+  });
+
+  listen("sidecar-log", (e) => appendLog(e.payload));
+  listen("sidecar-exit", (e) => {
+    running = false;
+    appendLog("[desktop] 仿真进程退出，code=" + e.payload + "\n");
+    setStatus("已退出", "err");
+    $("btnRun").disabled = false;
+    $("btnStop").disabled = true;
+  });
+  listen("build-changed", async () => {
+    if (!$("autoWatch").checked || !running || restarting) return;
+    restarting = true;
+    appendLog("[desktop] build 目录有更新，自动重启…\n");
+    try {
+      await startSim();
+    } finally {
+      restarting = false;
+    }
+  });
+
+  loadConfig();
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# 上游源码（按 README 的 git clone 获取）与编译产物
+/vendor/esp32sim/
+/src-tauri/target/
+/src-tauri/gen/
+
+# sidecar 二进制由 scripts/build-sidecar.ps1 生成
+/src-tauri/binaries/*.exe
+
+# 由 scripts/stage-web.cjs 生成
+/resources/web/
+
+# 构建与运行产物
+/dist/
+/out/
+node_modules/
+/.wv2-diag/
+
+# 验收过程日志与中间产物（正式记录见 docs/ACCEPTANCE.md）
+/docs/*.log
+/docs/acceptance-*.json
+/testdata/build/
+
+# 被修正版截图取代的早期截图
+/docs/p0-app.png
+
+# 编辑器与系统文件
+Thumbs.db
+Desktop.ini
+*.tmp
