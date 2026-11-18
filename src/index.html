@@ -346,8 +346,11 @@
     { v: "bmi270", label: "BMI270 六轴 IMU",  bus: "i2c",  def: { addr: "0x69" } },
     { v: "bmm150", label: "BMM150 磁力计",    bus: "i2c",  def: { addr: "0x10" } },
     { v: "ft5x06", label: "FT5X06 电容触摸",  bus: "i2c",  def: { addr: "0x38" } },
+    { v: "aht20",  label: "AHT20 温湿度",     bus: "i2c",  def: { addr: "0x38" } },
+    { v: "lsm6ds3", label: "LSM6DS3 六轴 IMU", bus: "i2c",  def: { addr: "0x6a" } },
     { v: "ws2812", label: "WS2812 灯带（RMT）", bus: "gpio", def: { pin: "8", leds: "12" } },
     { v: "st7735", label: "ST7735 屏（SPI）",  bus: "spi",  def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
+    { v: "ili9341", label: "ILI9341 屏 2.4″（SPI）", bus: "spi", def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
     { v: "co5300", label: "CO5300 屏（QSPI）", bus: "qspi", def: { host: "2", width: "368", height: "448", xoff: "16" } },
   ];
   const kindDef = (kind) => DEVICE_KINDS.find((k) => k.v === kind) || DEVICE_KINDS[0];
@@ -375,8 +378,12 @@
   function newDevice(kind) {
     const d = Object.assign({ kind }, kindDef(kind).def);
     if (isI2c(kind)) {
-      d.bus = "0";
-      d.addr = nextFreeAddr("0", d.addr);
+      // 先保住器件的默认地址：同地址在另一条总线上不冲突时换总线（AHT20/FT5X06 的 0x38 是
+      // 固定的，改地址反而挂不上）；两条总线都占了才在同一总线上顺延。
+      const want = parseInt(d.addr, 16);
+      const taken = (bus) => devices.some((x) => isI2c(x.kind) && String(x.bus) === String(bus) && parseInt(x.addr, 16) === want);
+      d.bus = !taken("0") ? "0" : !taken("1") ? "1" : "0";
+      if (taken(d.bus)) d.addr = nextFreeAddr(d.bus, d.addr);
     }
     return d;
   }
@@ -506,9 +513,9 @@
     return devices.map((d) => {
       const bus = kindDef(d.kind).bus;
       if (bus === "i2c") return d.bus + ":" + d.addr + ":" + d.kind;
-      if (bus === "gpio") return d.pin + ":" + d.leds + ":ws2812";
-      if (bus === "spi") return [d.sclk, d.mosi, d.cs, d.dc, "st7735"].join(":");
-      return [d.host, d.width, d.height, d.xoff, "co5300"].join(":");
+      if (bus === "gpio") return [d.pin, d.leds, d.kind].join(":");
+      if (bus === "spi") return [d.sclk, d.mosi, d.cs, d.dc, d.kind].join(":");
+      return [d.host, d.width, d.height, d.xoff, d.kind].join(":");
     });
   }
 
