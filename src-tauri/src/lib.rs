@@ -19,6 +19,9 @@ struct RunConfig {
     board: String,
     #[serde(default)]
     devices: Option<Vec<String>>,
+    /// 裸板传感器是否走 30 秒姿态脚本（0/1）；None 表示不下发，保持上游默认。
+    #[serde(default)]
+    imu_motion: Option<u32>,
     bootloader: String,
     ptable: String,
     app: String,
@@ -172,6 +175,10 @@ fn build_args(cfg: &RunConfig, port: u16) -> Vec<String> {
                 a.push("--device".into());
                 a.push(spec.trim().into());
             }
+        }
+        if let Some(mode) = cfg.imu_motion {
+            a.push("--imu-motion".into());
+            a.push(mode.to_string());
         }
     }
     a.extend([

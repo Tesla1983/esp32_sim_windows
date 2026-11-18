@@ -250,6 +250,7 @@
           <button type="button" class="small" id="btnAddDevice">＋ 添加器件</button>
         </div>
         <div id="deviceErr" class="hint" style="color:var(--err);"></div>
+        <label class="switch"><input type="checkbox" id="devDynamics"> 传感器读数动态变化（IMU 姿态脚本 / 温湿度漂移）</label>
       </div>
     </section>
 
@@ -536,6 +537,7 @@
       const cfg = JSON.parse(localStorage.getItem(storeKey) || "{}");
       fields.forEach((k) => { if (cfg[k] != null) $(k).value = cfg[k]; });
       if (cfg.autoWatch) $("autoWatch").checked = true;
+      $("devDynamics").checked = !!cfg.devDynamics;
       devices = Array.isArray(cfg.devices) ? cfg.devices.map(normalizeDevice) : [];
       renderDevices();
     } catch (_) { renderDevices(); }
@@ -558,12 +560,14 @@
       wav: $("wav").value.trim(),
       vcd: $("vcd").value.trim(),
       autoWatch: $("autoWatch").checked,
+      devDynamics: $("devDynamics").checked,
       devices: JSON.parse(JSON.stringify(devices)),
     };
   }
   function applyConfig(cfg) {
     fields.forEach((k) => { if (cfg[k] != null) $(k).value = cfg[k]; });
     $("autoWatch").checked = !!cfg.autoWatch;
+    $("devDynamics").checked = !!cfg.devDynamics;
     devices = Array.isArray(cfg.devices) ? cfg.devices.map(normalizeDevice) : [];
     renderDevices();
   }
@@ -582,6 +586,7 @@
     renderDevices();
     saveConfig();
   });
+  $("devDynamics").addEventListener("change", saveConfig);
   $("autoWatch").addEventListener("change", () => {
     saveConfig();
     if ($("autoWatch").checked) {
@@ -653,6 +658,7 @@
       chip: $("chip").value,
       board: $("board").value,
       devices: $("board").value === "custom" ? deviceSpecs() : null,
+      imuMotion: $("board").value === "custom" && $("devDynamics").checked ? 1 : null,
       bootloader: $("bootloader").value.trim(),
       ptable: $("ptable").value.trim(),
       app: $("app").value.trim(),
