@@ -27,3 +27,18 @@ node_modules/
 Thumbs.db
 Desktop.ini
 *.tmp
+
+# ── 不对外发布：开发过程、本机绝对路径、个人与设备信息 ──────────────
+# 开发计划与执行记录（含项目目录绝对路径、阶段验收数据）
+/PLAN.md
+# 文档与验收记录（含 E:\ 绝对路径、截图、本机环境）
+/docs/
+# 补丁导出的邮件头含作者邮箱
+/patches/
+# Espressif mask ROM，不随仓库分发
+/roms/
+# 验收 / 诊断脚本硬编码了本机绝对路径
+/scripts/acceptance*.cjs
+/scripts/verify-*.cjs
+/scripts/diag-*.cjs
+/scripts/diagnose-*.cjs
