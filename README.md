@@ -8,11 +8,32 @@ esp32sim 的 Windows 桌面启动器：选固件、点运行，在同一个窗�
 
 ## 快速开始
 
-1. 解压 `dist/esp32sim-desktop_0.1.0_x64-portable.zip`，或安装 `dist/esp32sim desktop_0.1.0_x64-setup.exe`。
-2. 准备 mask ROM（不随包分发）：放到 `roms\`，或让程序从 ESP-IDF 的 `~/.espressif/tools/esp-rom-elfs` 自动查找。
-3. 在界面里填 ESP-IDF / PlatformIO 的 build 目录，点「识别」，再点「运行」。
+1. 解压 `dist/esp32sim-desktop_0.1.0_x64-portable.zip`，或安装 `dist/esp32sim desktop_0.1.0_x64-setup.exe`（需 WebView2 运行时，Win10 1809+ / Win11 通常自带）。
+2. 准备 mask ROM（不随包分发）：放到 `roms\`，或让程序从 ESP-IDF 的 `%USERPROFILE%\.espressif\tools\esp-rom-elfs` 自动查找。
+3. 在界面里填 ESP-IDF / PlatformIO 的 build 目录，点「识别」，再点「运行」。build 目录需含 `bootloader.bin`、`partition-table.bin` 与 app 的 `.bin`/`.elf`。
 
-详见 [docs/USAGE.md](docs/USAGE.md)。
+## 界面速查
+
+| 区域 | 说明 |
+|---|---|
+| 芯片 / 板子 | 板子名须与芯片匹配，例如 `atech14` 只用于 ESP32-S3 |
+| 固件 | build 目录 + 三件套 + 可选 ELF |
+| ROM | 留空自动查找 |
+| 模块 | Flash / PSRAM 大小按固件编译配置填 |
+| 网络 | 填 SSID 启用虚拟 AP，固件可经 NAT 访问真实网络 |
+| 输出 | 截图 / 音频 / 波形文件保存路径 |
+| 自动化 | 勾选后监视 build 目录，产物更新即自动重启 |
+| 工程 | 保存 / 加载配置（`%APPDATA%\dev.esp32sim.desktop\project.json`） |
+
+## 常见错误
+
+| 提示 | 原因 | 处理 |
+|---|---|---|
+| `找不到 <chip> 的 mask ROM` | ROM 不在自动查找路径 | 放到 `roms\` 或手动指定 |
+| `bootloader 文件不存在` | 路径被移动或未识别 | 重选 build 目录并点「识别」 |
+| `not an ESP image` | 把整包 flash 当成了 app | 改用三件套 |
+| 启动后立刻重启 / 卡在 bootloader | Flash / PSRAM 大小与固件不符 | 按 `idf.py menuconfig` 配置填 |
+| 串口没有输出 | 控制台选错（UART0 vs USB-CDC） | 在 board 页切换 Console 标签 |
 
 ## 构建
 
@@ -35,14 +56,13 @@ cargo tauri build
 |---|---|
 | `src/` | 主界面（原生 HTML/CSS/JS） |
 | `src-tauri/` | Rust 后端：sidecar 启停、端口、ROM 查找、目录监视、工程读写 |
-| `scripts/` | 构建与验收脚本 |
+| `scripts/` | 构建脚本 |
 | `resources/web/` | 由 `stage-web.cjs` 生成的上游板面资源（含 embed 补丁，不入库） |
-| `docs/` | 计划书、验收记录、使用说明、截图 |
 | `vendor/esp32sim/` | 上游源码（构建依赖，不入库） |
 
 ## 验收
 
-见 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。A1–A6、A8–A10 已通过；A7（30 分钟长跑）待补测。
+已在 Windows x64 上验证：启动、固件三件套识别、sidecar 拉起、板面加载与串口日志均正常。
 
 ## 许可
 
