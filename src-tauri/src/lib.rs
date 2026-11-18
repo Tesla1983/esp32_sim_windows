@@ -17,6 +17,8 @@ struct WatchState(Mutex<Option<notify::RecommendedWatcher>>);
 struct RunConfig {
     chip: String,
     board: String,
+    #[serde(default)]
+    devices: Option<Vec<String>>,
     bootloader: String,
     ptable: String,
     app: String,
@@ -161,6 +163,17 @@ fn build_args(cfg: &RunConfig, port: u16) -> Vec<String> {
         cfg.chip.clone(),
         "--board".into(),
         cfg.board.clone(),
+    ];
+    // 裸板自由搭配：每条 "bus:addr:kind" 作为一次 --device 传给 sidecar。
+    if cfg.board == "custom" {
+        if let Some(devices) = cfg.devices.as_ref() {
+            for spec in devices.iter().filter(|s| !s.trim().is_empty()) {
+                a.push("--device".into());
+                a.push(spec.trim().into());
+            }
+        }
+    }
+    a.extend([
         "--boot".into(),
         "rom".into(),
         "--bootloader".into(),
@@ -171,7 +184,7 @@ fn build_args(cfg: &RunConfig, port: u16) -> Vec<String> {
         cfg.app.clone(),
         "--web".into(),
         port.to_string(),
-    ];
+    ]);
     if let Some(v) = cfg.elf.as_ref().filter(|s| !s.is_empty()) {
         a.push("--elf".into());
         a.push(v.clone());
@@ -235,6 +248,70 @@ fn app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建数据目录：{e}"))?;
     Ok(dir.to_string_lossy().to_string())
+}
+
+// ---- 窗口尺寸记忆 ----
+// 只持久化宽高两列到 app_data_dir/window-size.json。
+// 读取/解析/校验的任何失败都静默忽略，窗口保持 tauri.conf 里的默认尺寸，绝不影响启动。
+
+const WINDOW_STATE_FILE: &str = "window-size.json";
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct WindowSize {
+    width: u32,
+    height: u32,
+}
+
+fn window_state_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join(WINDOW_STATE_FILE))
+}
+
+/// 挡掉 0 / 损坏的极大值；负数在 u32 解析阶段就已被拒。
+fn sane_window_size(w: u32, h: u32) -> bool {
+    (320..=16384).contains(&w) && (240..=16384).contains(&h)
+}
+
+/// 启动时应用上次的窗口尺寸；任何异常都静默忽略，使用配置默认值。
+fn restore_window_size(app: &tauri::AppHandle) {
+    let saved = window_state_path(app)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<WindowSize>(&s).ok())
+        .filter(|v| sane_window_size(v.width, v.height));
+    if let (Some(v), Some(win)) = (saved, app.get_webview_window("main")) {
+        let _ = win.set_size(tauri::PhysicalSize {
+            width: v.width,
+            height: v.height,
+        });
+    }
+}
+
+/// 窗口关闭时保存当前尺寸；写盘失败静默忽略，不影响退出。
+fn save_window_size(app: &tauri::AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let Ok(size) = win.inner_size() else {
+        return;
+    };
+    if !sane_window_size(size.width, size.height) {
+        return;
+    }
+    let Some(path) = window_state_path(app) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let data = WindowSize {
+        width: size.width,
+        height: size.height,
+    };
+    if let Ok(json) = serde_json::to_string(&data) {
+        let _ = std::fs::write(path, json);
+    }
 }
 
 #[tauri::command]
@@ -410,6 +487,17 @@ pub fn run() {
         }))
         .manage(SidecarState(Mutex::new(None)))
         .manage(WatchState(Mutex::new(None)))
+        .setup(|app| {
+            // 窗口在 tauri.conf.json 里设为 visible:false，先定好尺寸再显示，
+            // 避免「默认尺寸先闪一下、再跳到 restores 尺寸」。首次/异常时保持默认尺寸。
+            restore_window_size(app.handle());
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.center();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             detect_build_dir,
             detect_rom,
@@ -423,15 +511,21 @@ pub fn run() {
             stop_sim
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                if let Some(state) = window.app_handle().try_state::<SidecarState>() {
-                    kill_sidecar(&state);
+            match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    save_window_size(window.app_handle());
                 }
-                if let Some(state) = window.app_handle().try_state::<WatchState>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        *guard = None;
+                tauri::WindowEvent::Destroyed => {
+                    if let Some(state) = window.app_handle().try_state::<SidecarState>() {
+                        kill_sidecar(&state);
+                    }
+                    if let Some(state) = window.app_handle().try_state::<WatchState>() {
+                        if let Ok(mut guard) = state.0.lock() {
+                            *guard = None;
+                        }
                     }
                 }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
