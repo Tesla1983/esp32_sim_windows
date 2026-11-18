@@ -100,6 +100,14 @@
   .row { display: flex; gap: 6px; margin-top: 4px; }
   .row input { margin-top: 0; }
   .row button { flex: 0 0 auto; padding: 7px 12px; }
+  /* 器件行：同一行内的输入框与下拉框强制同高，消除地址框和相邻控件的半像素错位 */
+  .device-row input, .device-row select { height: 32px; box-sizing: border-box; }
+  /* 非 I2C 器件字段多：接线占一行，型号与删除占一行 */
+  .dv-stack { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+  .dv-line { display: flex; gap: 6px; align-items: center; }
+  .dv-line select { flex: 1; margin-top: 0; }
+  .dv-line input { margin-top: 0; }
+  .dv-line .dv-del { flex: 0 0 auto; }
   .hint { font-size: 11.5px; color: #6b7385; line-height: 1.5; margin: -3px 0 9px; }
   .switch { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); margin-bottom: 9px; }
   .switch input { margin: 0; }
@@ -235,9 +243,10 @@
         </select>
       </label>
       <div id="devicesBox" style="display:none;">
-        <div class="hint">裸板上没有预设外设，器件由你指定。总线 0/1，地址用 0x76 这样的十六进制。</div>
+        <div class="hint">裸板上没有预设外设，接线按真实总线给：I2C 填总线+地址，灯带填数据脚，屏填 SPI 引脚或 host+尺寸。</div>
         <div id="deviceRows"></div>
         <div class="row">
+          <select id="newKind" style="flex:1;margin-top:0;"></select>
           <button type="button" class="small" id="btnAddDevice">＋ 添加器件</button>
         </div>
         <div id="deviceErr" class="hint" style="color:var(--err);"></div>
@@ -330,45 +339,119 @@
   const invoke = tauri.core ? tauri.core.invoke : async () => { throw new Error("未在 Tauri 环境中运行"); };
   const listen = tauri.event ? tauri.event.listen : async () => () => {};
 
+  // 模拟器建模的全部器件，按真实总线归类：I2C 用总线+地址，WS2812 用数据脚，SPI 屏用引脚，
+  // QSPI 屏用 host+尺寸。`def` 是新建该器件时的默认接线。
   const DEVICE_KINDS = [
-    ["bmp280", "BMP280 气压/温度"],
-    ["bmi270", "BMI270 六轴 IMU"],
-    ["bmm150", "BMM150 磁力计"],
-    ["ft5x06", "FT5X06 电容触摸"],
+    { v: "bmp280", label: "BMP280 气压/温度", bus: "i2c",  def: { addr: "0x76" } },
+    { v: "bmi270", label: "BMI270 六轴 IMU",  bus: "i2c",  def: { addr: "0x69" } },
+    { v: "bmm150", label: "BMM150 磁力计",    bus: "i2c",  def: { addr: "0x10" } },
+    { v: "ft5x06", label: "FT5X06 电容触摸",  bus: "i2c",  def: { addr: "0x38" } },
+    { v: "ws2812", label: "WS2812 灯带（RMT）", bus: "gpio", def: { pin: "8", leds: "12" } },
+    { v: "st7735", label: "ST7735 屏（SPI）",  bus: "spi",  def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
+    { v: "co5300", label: "CO5300 屏（QSPI）", bus: "qspi", def: { host: "2", width: "368", height: "448", xoff: "16" } },
   ];
-  const DEFAULT_ADDR = { bmp280: "0x76", bmi270: "0x69", bmm150: "0x10", ft5x06: "0x38" };
+  const kindDef = (kind) => DEVICE_KINDS.find((k) => k.v === kind) || DEVICE_KINDS[0];
+  const isI2c = (kind) => kindDef(kind).bus === "i2c";
   let devices = [];
+
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const kindOptions = (sel) => DEVICE_KINDS.map((k) => '<option value="' + k.v + '"' + (sel === k.v ? " selected" : "") + ">" + k.label + "</option>").join("");
+
+  /// 同总线上第一个空闲的 7-bit I2C 地址：从 preferred 起顺延，回绕到 0x03。
+  function nextFreeAddr(bus, preferred) {
+    const used = new Set(devices
+      .filter((d) => isI2c(d.kind) && String(d.bus) === String(bus))
+      .map((d) => parseInt(d.addr, 16)));
+    const lo = 0x03, hi = 0x77;
+    let start = parseInt(preferred, 16);
+    if (!Number.isFinite(start) || start < lo || start > hi) start = lo;
+    for (let i = 0; i <= hi - lo; i++) {
+      const cand = lo + ((start - lo + i) % (hi - lo + 1));
+      if (!used.has(cand)) return "0x" + cand.toString(16).padStart(2, "0");
+    }
+    return preferred;
+  }
+
+  function newDevice(kind) {
+    const d = Object.assign({ kind }, kindDef(kind).def);
+    if (isI2c(kind)) {
+      d.bus = "0";
+      d.addr = nextFreeAddr("0", d.addr);
+    }
+    return d;
+  }
+
+  function normalizeDevice(d) {
+    const kind = (d && d.kind) || "bmp280";
+    const out = Object.assign({ kind }, kindDef(kind).def);
+    for (const k of Object.keys(d || {})) if (k !== "kind") out[k] = String(d[k]);
+    return out;
+  }
+
+  function pinInput(cls, key, value, placeholder, width) {
+    const w = width || 46;
+    return '<input class="' + cls + '" data-key="' + key + '" style="width:' + w + 'px;flex:0 0 ' + w + 'px;margin-top:0;" value="' + esc(value) + '" placeholder="' + placeholder + '">';
+  }
 
   function renderDevices() {
     const host = $("deviceRows");
     host.innerHTML = "";
     devices.forEach((d, i) => {
+      const def = kindDef(d.kind);
       const row = document.createElement("div");
-      row.className = "row device-row";
-      row.style.marginBottom = "6px";
-      row.innerHTML =
-        '<select class="dv-bus" style="width:52px;flex:0 0 52px;margin-top:0;">' +
-          '<option value="0"' + (String(d.bus) === "0" ? " selected" : "") + '>0</option>' +
-          '<option value="1"' + (String(d.bus) === "1" ? " selected" : "") + '>1</option>' +
-        '</select>' +
-        '<input class="dv-addr" style="width:62px;flex:0 0 62px;margin-top:0;" value="' + d.addr + '" placeholder="0x76">' +
-        '<select class="dv-kind" style="flex:1;margin-top:0;">' +
-          DEVICE_KINDS.map(([v, label]) => '<option value="' + v + '"' + (d.kind === v ? " selected" : "") + '>' + label + '</option>').join("") +
-        '</select>' +
+      let wiring;
+      if (def.bus === "i2c") {
+        // I2C 行保持原样：总线 + 地址 + 型号 + 删除，一行排开。
+        row.className = "row device-row";
+        row.style.marginBottom = "6px";
+        wiring =
+          '<select class="dv-bus" data-key="bus" style="width:52px;flex:0 0 52px;margin-top:0;">' +
+            '<option value="0"' + (String(d.bus) === "0" ? " selected" : "") + ">0</option>" +
+            '<option value="1"' + (String(d.bus) === "1" ? " selected" : "") + ">1</option>" +
+          "</select>" +
+          '<input class="dv-addr" data-key="addr" style="width:62px;flex:0 0 62px;margin-top:0;" value="' + esc(d.addr) + '" placeholder="0x76">';
+      } else {
+        // 其他总线字段多：接线一行，型号与删除一行。
+        row.className = "dv-stack";
+        let pins;
+        if (def.bus === "gpio") {
+          pins = pinInput("dv-pin", "pin", d.pin, "数据脚", 56) + pinInput("dv-leds", "leds", d.leds, "LED 数", 64);
+        } else if (def.bus === "spi") {
+          pins = pinInput("dv-sclk", "sclk", d.sclk, "SCLK", 52) + pinInput("dv-mosi", "mosi", d.mosi, "MOSI", 52) +
+                 pinInput("dv-cs", "cs", d.cs, "CS", 46) + pinInput("dv-dc", "dc", d.dc, "DC", 46);
+        } else {
+          pins = pinInput("dv-host", "host", d.host, "SPI", 46) + pinInput("dv-width", "width", d.width, "宽", 52) +
+                 pinInput("dv-height", "height", d.height, "高", 52) + pinInput("dv-xoff", "xoff", d.xoff, "偏移", 50);
+        }
+        wiring = '<div class="dv-line">' + pins + "</div>";
+      }
+      const meta =
+        '<select class="dv-kind" style="flex:1;margin-top:0;">' + kindOptions(d.kind) + "</select>" +
         '<button type="button" class="small dv-del" title="移除">×</button>';
-      const read = () => {
-        d.bus = Number(row.querySelector(".dv-bus").value);
-        d.addr = row.querySelector(".dv-addr").value.trim();
-        d.kind = row.querySelector(".dv-kind").value;
-        validateDevices();
+      row.innerHTML = wiring + (def.bus === "i2c" ? meta : '<div class="dv-line">' + meta + "</div>");
+
+      row.querySelectorAll("[data-key]").forEach((el) => {
+        el.addEventListener("change", () => {
+          row.querySelectorAll("[data-key]").forEach((x) => { d[x.dataset.key] = x.value.trim(); });
+          // 换总线时地址可能与新总线上的器件撞车，自动让到第一个空闲地址。
+          if (el.dataset.key === "bus" && isI2c(d.kind)) {
+            const free = nextFreeAddr(d.bus, d.addr);
+            if (free !== d.addr) { d.addr = free; renderDevices(); saveConfig(); return; }
+          }
+          validateDevices();
+          saveConfig();
+        });
+        if (el.dataset.key === "addr") el.addEventListener("input", () => validateDevices());
+      });
+      row.querySelector(".dv-kind").addEventListener("change", (e) => {
+        // 换型号即按新类型重置接线，I2C 自动取空闲地址。
+        devices[i] = newDevice(e.target.value);
+        renderDevices();
         saveConfig();
-      };
-      row.querySelectorAll("select, input").forEach((el) => el.addEventListener("change", read));
-      row.querySelector(".dv-addr").addEventListener("input", read);
+      });
       row.querySelector(".dv-del").addEventListener("click", () => {
         devices.splice(i, 1);
         renderDevices();
-        validateDevices();
         saveConfig();
       });
       host.appendChild(row);
@@ -376,30 +459,57 @@
     $("devicesBox").style.display = $("board").value === "custom" ? "block" : "none";
     validateDevices();
   }
+  const isPin = (v) => /^\d+$/.test(String(v)) && Number(v) <= 48;
+  const isPosInt = (v, max) => /^\d+$/.test(String(v)) && Number(v) >= 1 && Number(v) <= max;
+
   function validateDevices() {
     const err = $("deviceErr");
     if ($("board").value !== "custom") { err.textContent = ""; return true; }
     if (!devices.length) { err.textContent = "至少添加一个器件。"; return false; }
     const seen = new Set();
     for (const d of devices) {
-      if (!/^0x[0-9a-fA-F]{1,2}$/.test(d.addr)) {
-        err.textContent = "地址要写成 0x76 这样的十六进制（1–2 位）。";
-        return false;
+      const bus = kindDef(d.kind).bus;
+      if (bus === "i2c") {
+        if (!/^0x[0-9a-fA-F]{1,2}$/.test(String(d.addr))) {
+          err.textContent = "I2C 地址要写成 0x76 这样的十六进制（1–2 位）。";
+          return false;
+        }
+        const v = parseInt(d.addr, 16);
+        if (v < 0x03 || v > 0x77) {
+          err.textContent = "I2C 地址超出 7-bit 范围（0x03–0x77）。";
+          return false;
+        }
+        const key = d.bus + ":" + v;
+        if (seen.has(key)) { err.textContent = "同一 I2C 总线上地址冲突：" + d.addr + "。"; return false; }
+        seen.add(key);
+      } else if (bus === "gpio") {
+        if (!isPin(d.pin) || !isPosInt(d.leds, 2048)) {
+          err.textContent = "WS2812 需要有效的数据引脚（0–48）和 1–2048 的 LED 数量。";
+          return false;
+        }
+      } else if (bus === "spi") {
+        if (![d.sclk, d.mosi, d.cs, d.dc].every(isPin)) {
+          err.textContent = "ST7735 需要 SCLK / MOSI / CS / DC 四个有效引脚（0–48）。";
+          return false;
+        }
+      } else if (bus === "qspi") {
+        if (!isPin(d.host) || !isPosInt(d.width, 1024) || !isPosInt(d.height, 1024)) {
+          err.textContent = "CO5300 需要有效 SPI host（0–48）和 1–1024 的宽高。";
+          return false;
+        }
       }
-      const v = parseInt(d.addr, 16);
-      if (v < 0x03 || v > 0x77) {
-        err.textContent = "地址超出 7-bit 范围（0x03–0x77）。";
-        return false;
-      }
-      const key = d.bus + ":" + v;
-      if (seen.has(key)) { err.textContent = "同一总线上地址冲突：" + d.addr + "。"; return false; }
-      seen.add(key);
     }
     err.textContent = "";
     return true;
   }
   function deviceSpecs() {
-    return devices.map((d) => d.bus + ":" + d.addr + ":" + d.kind);
+    return devices.map((d) => {
+      const bus = kindDef(d.kind).bus;
+      if (bus === "i2c") return d.bus + ":" + d.addr + ":" + d.kind;
+      if (bus === "gpio") return d.pin + ":" + d.leds + ":ws2812";
+      if (bus === "spi") return [d.sclk, d.mosi, d.cs, d.dc, "st7735"].join(":");
+      return [d.host, d.width, d.height, d.xoff, "co5300"].join(":");
+    });
   }
 
   const fields = ["chip", "board", "buildDir", "bootloader", "ptable", "app", "elf", "romPath",
@@ -419,9 +529,7 @@
       const cfg = JSON.parse(localStorage.getItem(storeKey) || "{}");
       fields.forEach((k) => { if (cfg[k] != null) $(k).value = cfg[k]; });
       if (cfg.autoWatch) $("autoWatch").checked = true;
-      devices = Array.isArray(cfg.devices) ? cfg.devices.map((d) => ({
-        bus: d.bus, addr: String(d.addr), kind: d.kind,
-      })) : [];
+      devices = Array.isArray(cfg.devices) ? cfg.devices.map(normalizeDevice) : [];
       renderDevices();
     } catch (_) { renderDevices(); }
   }
@@ -449,22 +557,21 @@
   function applyConfig(cfg) {
     fields.forEach((k) => { if (cfg[k] != null) $(k).value = cfg[k]; });
     $("autoWatch").checked = !!cfg.autoWatch;
-    devices = Array.isArray(cfg.devices) ? cfg.devices.map((d) => ({
-      bus: d.bus, addr: String(d.addr), kind: d.kind,
-    })) : [];
+    devices = Array.isArray(cfg.devices) ? cfg.devices.map(normalizeDevice) : [];
     renderDevices();
   }
+  // 添加器件的类型下拉，列出模拟器建模的全部器件。
+  $("newKind").innerHTML = kindOptions("bmp280");
   fields.forEach((k) => $(k).addEventListener("change", saveConfig));
   $("board").addEventListener("change", () => {
     if ($("board").value === "custom" && !devices.length) {
-      devices.push({ bus: 0, addr: DEFAULT_ADDR.bmp280, kind: "bmp280" });
+      devices.push(newDevice("bmp280"));
     }
     renderDevices();
     saveConfig();
   });
   $("btnAddDevice").addEventListener("click", () => {
-    const kind = "bmp280";
-    devices.push({ bus: 0, addr: DEFAULT_ADDR[kind], kind });
+    devices.push(newDevice($("newKind").value));
     renderDevices();
     saveConfig();
   });

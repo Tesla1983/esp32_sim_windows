@@ -164,7 +164,8 @@ fn build_args(cfg: &RunConfig, port: u16) -> Vec<String> {
         "--board".into(),
         cfg.board.clone(),
     ];
-    // 裸板自由搭配：每条 "bus:addr:kind" 作为一次 --device 传给 sidecar。
+    // 裸板自由搭配：每条器件 SPEC 作为一次 --device 传给 sidecar（I2C 用 bus:addr:model，
+    // 灯带用 pin:leds:ws2812，屏用引脚或 host+尺寸）。
     if cfg.board == "custom" {
         if let Some(devices) = cfg.devices.as_ref() {
             for spec in devices.iter().filter(|s| !s.trim().is_empty()) {
