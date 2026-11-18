@@ -5,7 +5,7 @@
 ## esp32sim
 
 - 项目：https://github.com/mikroverk/esp32sim
-- 版本：v0.4.0
+- 版本：main 基线 `d043ff1`（比 v0.4.0 新 18 个提交）
 - 授权：MIT
 - 使用方式：以未修改的上游源码编译出 `esp32sim.exe`，作为外置进程（sidecar）调用；`web/` 下的板面资源原样复制，仅追加一段 `?embed=1` 时生效的样式补丁。
 

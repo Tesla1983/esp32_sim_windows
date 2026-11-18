@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path (Join-Path $Source "Cargo.toml"))) {
-    throw "找不到上游源码：$Source（先执行 git clone --branch v0.4.0）"
+    throw "找不到上游源码：$Source（先按 README 克隆上游并 checkout d043ff1）"
 }
 
 Push-Location $Source

@@ -2,7 +2,7 @@
 
 esp32sim 的 Windows 桌面启动器：选固件、点运行，在同一个窗口里看板面、串口与网络面板，改完固件自动重启。
 
-- 上游模拟器：[mikroverk/esp32sim](https://github.com/mikroverk/esp32sim) v0.4.0（MIT）
+- 上游模拟器：[mikroverk/esp32sim](https://github.com/mikroverk/esp32sim) main 基线 `d043ff1`（MIT；比 v0.4.0 新 18 个提交）
 - 本壳：Tauri 2 + WebView2，sidecar 调用上游原生二进制
 - 平台：Windows 10 1809+ / 11 x64
 
@@ -38,7 +38,8 @@ esp32sim 的 Windows 桌面启动器：选固件、点运行，在同一个窗�
 ## 构建
 
 ```powershell
-git clone --depth 1 --branch v0.4.0 https://github.com/mikroverk/esp32sim.git vendor/esp32sim
+git clone https://github.com/mikroverk/esp32sim.git vendor/esp32sim
+git -C vendor/esp32sim checkout d043ff1dd3e53aca18a23f4f2b18bfb038a57667
 powershell -ExecutionPolicy Bypass -File scripts\build-sidecar.ps1
 node scripts\stage-web.cjs
 cd src-tauri
