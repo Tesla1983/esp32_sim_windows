@@ -349,9 +349,11 @@
     { v: "ft5x06", label: "FT5X06 电容触摸",  bus: "i2c",  def: { addr: "0x38" } },
     { v: "aht20",  label: "AHT20 温湿度",     bus: "i2c",  def: { addr: "0x38" } },
     { v: "lsm6ds3", label: "LSM6DS3 六轴 IMU", bus: "i2c",  def: { addr: "0x6a" } },
+    { v: "sh1106", label: "SH1106 OLED 1.3″（I2C）", bus: "i2c", def: { addr: "0x3c" } },
     { v: "ws2812", label: "WS2812 灯带（RMT）", bus: "gpio", def: { pin: "8", leds: "12" } },
     { v: "st7735", label: "ST7735 屏（SPI）",  bus: "spi",  def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
     { v: "ili9341", label: "ILI9341 屏 2.4″（SPI）", bus: "spi", def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
+    { v: "nt7534", label: "NT7534 单色屏 3.5″（SPI）", bus: "spi", def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
     { v: "co5300", label: "CO5300 屏（QSPI）", bus: "qspi", def: { host: "2", width: "368", height: "448", xoff: "16" } },
   ];
   const kindDef = (kind) => DEVICE_KINDS.find((k) => k.v === kind) || DEVICE_KINDS[0];
@@ -425,8 +427,10 @@
         if (def.bus === "gpio") {
           pins = pinInput("dv-pin", "pin", d.pin, "数据脚", 56) + pinInput("dv-leds", "leds", d.leds, "LED 数", 64);
         } else if (def.bus === "spi") {
+          // The monochrome NT7534 names its command/data line RS; the colour panels call it DC.
+          const fourth = d.kind === "nt7534" ? "RS" : "DC";
           pins = pinInput("dv-sclk", "sclk", d.sclk, "SCLK", 52) + pinInput("dv-mosi", "mosi", d.mosi, "MOSI", 52) +
-                 pinInput("dv-cs", "cs", d.cs, "CS", 46) + pinInput("dv-dc", "dc", d.dc, "DC", 46);
+                 pinInput("dv-cs", "cs", d.cs, "CS", 46) + pinInput("dv-dc", "dc", d.dc, fourth, 46);
         } else {
           pins = pinInput("dv-host", "host", d.host, "SPI", 46) + pinInput("dv-width", "width", d.width, "宽", 52) +
                  pinInput("dv-height", "height", d.height, "高", 52) + pinInput("dv-xoff", "xoff", d.xoff, "偏移", 50);
