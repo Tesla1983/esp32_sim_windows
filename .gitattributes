@@ -1,0 +1,9 @@
+# 统一行尾，避免 Windows 检出时改写补丁文本
+* text=auto
+*.patch -text
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
