@@ -296,6 +296,7 @@
       <label>屏幕截图 PNG<input id="tftPng" placeholder="例如 out/tft.png"></label>
       <label>音频 WAV<input id="wav" placeholder="例如 out/audio.wav"></label>
       <label>GPIO 波形 VCD<input id="vcd" placeholder="例如 out/gpio.vcd"></label>
+      <label>总线日志（给 AI 读）<input id="buslog" placeholder="例如 out/buslog.txt"></label>
       <button id="btnOpenOut" class="small">打开输出目录</button>
     </section>
 
@@ -525,7 +526,7 @@
   }
 
   const fields = ["chip", "board", "buildDir", "bootloader", "ptable", "app", "elf", "romPath",
-                  "flashMb", "psramMb", "wifiSsid", "wifiPsk", "tftPng", "wav", "vcd"];
+                  "flashMb", "psramMb", "wifiSsid", "wifiPsk", "tftPng", "wav", "vcd", "buslog"];
   const storeKey = "esp32sim-desktop.config";
   let running = false;
   let restarting = false;
@@ -563,6 +564,7 @@
       tftPng: $("tftPng").value.trim(),
       wav: $("wav").value.trim(),
       vcd: $("vcd").value.trim(),
+      buslog: $("buslog").value.trim(),
       autoWatch: $("autoWatch").checked,
       devDynamics: $("devDynamics").checked,
       devices: JSON.parse(JSON.stringify(devices)),
@@ -675,6 +677,7 @@
       tftPng: $("tftPng").value.trim() || null,
       wav: $("wav").value.trim() || null,
       vcd: $("vcd").value.trim() || null,
+      buslog: $("buslog").value.trim() || null,
     };
     if ($("board").value === "custom" && $("chip").value !== "s3") {
       banner("裸板自由搭配目前只支持 ESP32-S3，请把芯片切回 S3。", "err");
@@ -787,7 +790,7 @@
   });
 
   $("btnOpenOut").addEventListener("click", async () => {
-    const p = $("tftPng").value.trim() || $("wav").value.trim() || $("vcd").value.trim() || $("buildDir").value.trim();
+    const p = $("tftPng").value.trim() || $("wav").value.trim() || $("vcd").value.trim() || $("buslog").value.trim() || $("buildDir").value.trim();
     if (!p) { banner("还没有输出路径或 build 目录。", "warn"); return; }
     try {
       await invoke("open_path", { path: p });

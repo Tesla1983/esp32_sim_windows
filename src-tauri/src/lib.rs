@@ -34,6 +34,7 @@ struct RunConfig {
     tft_png: Option<String>,
     wav: Option<String>,
     vcd: Option<String>,
+    buslog: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -224,6 +225,10 @@ fn build_args(cfg: &RunConfig, port: u16) -> Vec<String> {
     }
     if let Some(v) = cfg.vcd.as_ref().filter(|s| !s.is_empty()) {
         a.push("--vcd".into());
+        a.push(v.clone());
+    }
+    if let Some(v) = cfg.buslog.as_ref().filter(|s| !s.is_empty()) {
+        a.push("--buslog".into());
         a.push(v.clone());
     }
     a

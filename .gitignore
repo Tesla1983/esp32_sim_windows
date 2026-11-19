@@ -15,6 +15,10 @@
 node_modules/
 /.wv2-diag/
 
+# 示例固件的编译产物（几百 MB 的中间文件）与导出的画面预览
+/firmware/*/build/
+/firmware/*/preview.png
+
 # 验收过程日志与中间产物（正式记录见 docs/ACCEPTANCE.md）
 /docs/*.log
 /docs/acceptance-*.json
