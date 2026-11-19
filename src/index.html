@@ -1305,6 +1305,8 @@
     // 用 .fit / .on 控制显示；内联 display 会盖过类样式，故不设内联。
     $("pinmap").classList.toggle("fit", pins);
     $("canvas").classList.toggle("on", canvas);
+    // 画布自带「← 返回板子视图」，右上角页签在这里是重复入口，藏掉；其它视图仍保留。
+    $("viewTabs").style.display = canvas ? "none" : "flex";
     if (board) {
       // 回到板子视图时按运行状态恢复，和 startSim/stopSim 的显示逻辑保持一致。
       $("boardFrame").style.display = running ? "block" : "none";
