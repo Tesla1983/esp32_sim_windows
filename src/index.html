@@ -301,6 +301,9 @@
   .cv-addr input {
     width: 100%; margin: 0; padding: 3px 6px; height: 24px; font-size: 11px;
   }
+  .cv-addr select {
+    flex: 1; margin: 0; padding: 2px 6px; height: 24px; font-size: 11px;
+  }
   .cv-addr span { font-size: 10.5px; color: #6b7385; white-space: nowrap; }
   .cv-temp { stroke-dasharray: 4 3; stroke-width: 1.5; fill: none; }
   .cv-wire { stroke-width: 1.6; fill: none; }
@@ -502,9 +505,6 @@
       const taken = (bus) => devices.some((x) => isI2c(x.kind) && String(x.bus) === String(bus) && parseInt(x.addr, 16) === want);
       d.bus = !taken("0") ? "0" : !taken("1") ? "1" : "0";
       if (taken(d.bus)) d.addr = nextFreeAddr(d.bus, d.addr);
-      // 画布上的 I2C 连线以 SDA/SCL 引脚对区分总线；新器件给该总线的默认引脚对。
-      const pair = I2C_BUS_DEFAULT[d.bus] || I2C_BUS_DEFAULT["0"];
-      d.sda = pair.sda; d.scl = pair.scl;
     }
     return d;
   }
@@ -568,9 +568,6 @@
           row.querySelectorAll("[data-key]").forEach((x) => { d[x.dataset.key] = x.value.trim(); });
           // 换总线时地址可能与新总线上的器件撞车，自动让到第一个空闲地址。
           if (el.dataset.key === "bus" && isI2c(d.kind)) {
-            // 换总线 = 换一组 SDA/SCL 引脚，画布上的连线随之更新。
-            const pair = I2C_BUS_DEFAULT[d.bus] || I2C_BUS_DEFAULT["0"];
-            d.sda = pair.sda; d.scl = pair.scl;
             const free = nextFreeAddr(d.bus, d.addr);
             if (free !== d.addr) { d.addr = free; renderDevices(); saveConfig(); return; }
             if (viewMode === "canvas") renderCanvas();
@@ -607,10 +604,6 @@
     if ($("board").value !== "custom") { err.textContent = ""; return true; }
     if (!devices.length) { err.textContent = "至少添加一个器件。"; return false; }
     ensureLayout();
-    if (i2cBusOverflow) {
-      err.textContent = "I2C 只能有两条总线：同一组 SDA/SCL 引脚才算同一条，请把多出来的第三组改回前两组之一。";
-      return false;
-    }
     const seen = new Set();
     const exclusive = new Map(); // gpio -> "器件名 · 角色"
     const claim = (g, who) => {
@@ -638,8 +631,10 @@
           err.textContent = "I2C 地址超出 7-bit 范围（0x03–0x77）。";
           return false;
         }
-        if (!isPin(d.sda) || !isPin(d.scl) || String(d.sda) === String(d.scl)) {
-          err.textContent = name + " 需要两条不同的 SDA / SCL 有效引脚（0–48）。";
+        // SDA/SCL 是可选接线：两边都没连 = 按地址应答的旧行为；连了就必须成对且有效。
+        const anyPin = d.sda || d.scl;
+        if (anyPin && (!isPin(d.sda) || !isPin(d.scl) || String(d.sda) === String(d.scl))) {
+          err.textContent = name + " 的 SDA / SCL 要成对连接到两条不同的有效引脚（0–48）。";
           return false;
         }
         const key = d.bus + ":" + v;
@@ -671,7 +666,11 @@
   function deviceSpecs() {
     return devices.map((d) => {
       const bus = kindDef(d.kind).bus;
-      if (bus === "i2c") return d.bus + ":" + d.addr + ":" + d.kind;
+      if (bus === "i2c") {
+        // 带 SDA/SCL 时下发 BUS:ADDR:SDA:SCL:MODEL，让内核按物理引脚过滤（未接到就不应答）。
+        if (isPin(d.sda) && isPin(d.scl)) return [d.bus, d.addr, d.sda, d.scl, d.kind].join(":");
+        return d.bus + ":" + d.addr + ":" + d.kind;
+      }
       if (bus === "gpio") return [d.pin, d.leds, d.kind].join(":");
       if (bus === "spi") return [d.sclk, d.mosi, d.cs, d.dc, d.kind].join(":");
       return [d.host, d.width, d.height, d.xoff, d.kind].join(":");
@@ -868,11 +867,9 @@
     37: { t: "八线 PSRAM 占用", psram: true },
   };
 
-  // 默认两条 I2C 总线对应的 SDA/SCL 引脚；画布上同一条 SDA/SCL 对 = 同一条总线。
-  const I2C_BUS_DEFAULT = { "0": { sda: "8", scl: "9" }, "1": { sda: "4", scl: "5" } };
+  // 引脚只在画布上真正连线后才下发；总线号由用户显式选择（固件决定用哪个控制器）。
 
   let canvasTimer = 0;
-  let i2cBusOverflow = false;
 
   function pinBlocked(gpio) {
     const note = PIN_NOTES[gpio];
@@ -901,36 +898,16 @@
         d._x = String(320 + (i % 3) * 210);
         d._y = String(24 + Math.floor(i / 3) * 168);
       }
-      if (kindDef(d.kind).bus === "i2c") {
-        const def = I2C_BUS_DEFAULT[String(d.bus)] || I2C_BUS_DEFAULT["0"];
-        if (!d.sda) d.sda = def.sda;
-        if (!d.scl) d.scl = def.scl;
-      }
       i++;
     });
   }
 
-  /// 同一条 SDA/SCL 引脚对归为同一条总线。默认两组引脚分别锚定 I2C0 / I2C1，
-  /// 这样表单里显式选的总线不会被顺序打乱；自定义引脚对占用剩余空闲总线，两条都占则报错。
-  const I2C_PAIR_ANCHOR = { "8/9": "0", "4/5": "1" };
+  /// I2C 总线号由用户在表单/卡片上显式选择（固件决定用哪个控制器），SDA/SCL 只是物理绑定。
+  /// 这里只保证每个 I2C 器件有合法总线号。
   function refreshI2cBuses() {
-    i2cBusOverflow = false;
-    const used = new Map(); // "sda/scl" -> bus
     devices.forEach((d) => {
       if (kindDef(d.kind).bus !== "i2c") return;
-      if (!d.sda || !d.scl) {
-        const def = I2C_BUS_DEFAULT[String(d.bus)] || I2C_BUS_DEFAULT["0"];
-        d.sda = def.sda; d.scl = def.scl;
-      }
-      const key = d.sda + "/" + d.scl;
-      let bus = used.has(key) ? used.get(key) : I2C_PAIR_ANCHOR[key];
-      if (bus === undefined) {
-        const taken = new Set(used.values());
-        bus = !taken.has("0") ? "0" : !taken.has("1") ? "1" : null;
-      }
-      if (bus === null) { i2cBusOverflow = true; return; }
-      used.set(key, bus);
-      d.bus = bus;
+      if (d.bus !== "0" && d.bus !== "1") d.bus = "0";
     });
   }
   // 兼容旧调用名
@@ -974,7 +951,13 @@
       }).join("");
       let extra = "";
       if (kindDef(d.kind).bus === "i2c") {
-        extra = '<div class="cv-addr"><span>地址</span><input data-dev="' + di + '" data-field="addr" value="' + esc(d.addr || "") + '" placeholder="0x76"></div>';
+        const b = String(d.bus === "1" ? "1" : "0");
+        extra =
+          '<div class="cv-addr"><span>总线</span><select data-dev="' + di + '" data-field="bus">' +
+            '<option value="0"' + (b === "0" ? " selected" : "") + ">I2C0</option>" +
+            '<option value="1"' + (b === "1" ? " selected" : "") + ">I2C1</option>" +
+          "</select></div>" +
+          '<div class="cv-addr"><span>地址</span><input data-dev="' + di + '" data-field="addr" value="' + esc(d.addr || "") + '" placeholder="0x76"></div>';
       } else if (kindDef(d.kind).bus === "qspi") {
         extra = '<div class="cv-note">QSPI 由 host 直连建模，无需逐脚连线。</div>';
       }
@@ -1174,6 +1157,17 @@
     surface.querySelectorAll(".cv-addr input").forEach((inp) => {
       inp.addEventListener("change", () => {
         devices[Number(inp.dataset.dev)].addr = inp.value.trim();
+        renderDevices(); renderCanvas(); saveConfig();
+      });
+    });
+
+    surface.querySelectorAll(".cv-addr select").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const d = devices[Number(sel.dataset.dev)];
+        d.bus = sel.value === "1" ? "1" : "0";
+        // 换总线后地址可能与新总线上的器件冲突，自动顺延到空闲地址。
+        const free = nextFreeAddr(d.bus, d.addr);
+        if (free !== d.addr) d.addr = free;
         renderDevices(); renderCanvas(); saveConfig();
       });
     });
