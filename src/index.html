@@ -264,9 +264,10 @@
 
   .cv-board {
     position: absolute; left: 20px; top: 8px; width: 300px;
-    border-radius: 12px; background: #10151c; border: 1px solid #2a3444;
+    border-radius: 12px; background: #10151c; border: 1px solid #2a3444; cursor: move;
   }
-  .cv-board-head { padding: 7px 12px 3px; }
+  .cv-board-head { padding: 7px 12px 3px; user-select: none; }
+  .cv-board-head:hover { background: rgba(55,138,221,.07); border-radius: 10px 10px 0 0; }
   .cv-board-head b { font-size: 12.5px; font-weight: 500; color: #e6eaf2; }
   .cv-board-head span { display: block; font-size: 10px; color: #6b7385; margin-top: 1px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -915,6 +916,9 @@
   let canvasTx = 12;
   let canvasTy = 8;
   let canvasFitted = false;
+  // 开发板在 world 坐标里的位置，跟器件卡一样可拖动、随工程保存。
+  let boardX = 20;
+  let boardY = 8;
 
   function pinBlocked(gpio) {
     const note = PIN_NOTES[gpio];
@@ -1080,7 +1084,7 @@
           '<button id="cvZoomIn" type="button" title="放大">＋</button>' +
           '<button id="cvFit" type="button" title="一屏放下所有器件">适应</button>' +
         '</div>' + chips +
-        '<span class="cv-hint">滚轮缩放 · 拖空白平移 · 从端子拉线到 GPIO</span></div>' +
+        '<span class="cv-hint">器件/开发板可任意拖动 · 滚轮缩放 · 拖空白平移 · 从端子拉线到 GPIO</span></div>' +
       '<div class="cv-viewport"><div class="cv-surface">' +
         '<svg class="cv-wires"></svg>' +
         '<div class="cv-board">' +
@@ -1100,6 +1104,11 @@
       c.style.left = Number(d._x) + "px";
       c.style.top = Number(d._y) + "px";
     });
+    const boardEl = host.querySelector(".cv-board");
+    if (boardEl) {
+      boardEl.style.left = boardX + "px";
+      boardEl.style.top = boardY + "px";
+    }
     const boardBody = host.querySelector(".cv-board-body");
     if (boardBody) boardBody.style.height = (S3_J1.length * 16 + 8) + "px";
 
@@ -1115,7 +1124,7 @@
     const surface = $("canvas").querySelector(".cv-surface");
     if (!surface) return;
     let maxY = 420;
-    surface.querySelectorAll(".cv-card").forEach((c) => {
+    surface.querySelectorAll(".cv-card, .cv-board").forEach((c) => {
       maxY = Math.max(maxY, c.offsetTop + c.offsetHeight + 40);
     });
     surface.style.height = maxY + "px";
@@ -1170,7 +1179,8 @@
 
       vp.addEventListener("pointerdown", (e) => {
         if (e.button !== 0) return;
-        if (e.target.closest(".cv-card, .cv-chip, .cv-pin, .cv-term, button, input, select")) return;
+        // 开发板自身可拖动，所以平移只响应真正的空白区；圆点/端子/卡片各有自己的拖拽。
+        if (e.target.closest(".cv-card, .cv-chip, .cv-board, .cv-pin, .cv-term, button, input, select")) return;
         e.preventDefault();
         const start = { x: e.clientX, y: e.clientY, tx: canvasTx, ty: canvasTy };
         vp.classList.add("panning");
@@ -1201,6 +1211,32 @@
     const fitBtn = host.querySelector("#cvFit");
     if (fitBtn) fitBtn.addEventListener("click", canvasFit);
 
+    // 开发板拖动：整块板（板头/丝印/背景）都能拖，只有 GPIO 圆点例外（留给拉线）。
+    const boardEl = surface.querySelector(".cv-board");
+    if (boardEl) {
+      boardEl.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || e.target.closest(".cv-pin")) return;
+        e.preventDefault();
+        const down = canvasLocal(e.clientX, e.clientY);
+        const ox = down.x - boardX, oy = down.y - boardY;
+        const move = (ev) => {
+          const p = canvasLocal(ev.clientX, ev.clientY);
+          boardX = Math.round(p.x - ox);
+          boardY = Math.round(p.y - oy);
+          boardEl.style.left = boardX + "px";
+          boardEl.style.top = boardY + "px";
+          drawWires();
+        };
+        const up = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+          shrinkSurface(); drawWires(); saveConfig();
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up);
+      });
+    }
+
     // 颜色芯片 → 拖到画布添加器件
     host.querySelectorAll(".cv-chip").forEach((chip) => {
       chip.addEventListener("pointerdown", (e) => {
@@ -1219,8 +1255,9 @@
           if (ev.clientX < vr.left || ev.clientX > vr.right || ev.clientY < vr.top || ev.clientY > vr.bottom) return;
           const p = canvasLocal(ev.clientX, ev.clientY);
           const d = newDevice(chip.dataset.kind);
-          d._x = String(Math.max(340, Math.round(p.x - 94)));
-          d._y = String(Math.max(8, Math.round(p.y - 20)));
+          // 允许放在画布任意位置（含开发板左侧）；重叠由用户自己决定，不再夹到 340。
+          d._x = String(Math.round(p.x - 94));
+          d._y = String(Math.round(p.y - 20));
           devices.push(d);
           renderDevices(); renderCanvas(); saveConfig();
         };
@@ -1240,8 +1277,8 @@
         const oy = down.y - Number(devices[di]._y);
         const move = (ev) => {
           const p = canvasLocal(ev.clientX, ev.clientY);
-          const x = Math.max(0, p.x - ox);
-          const y = Math.max(0, p.y - oy);
+          const x = p.x - ox;
+          const y = p.y - oy;
           devices[di]._x = String(Math.round(x));
           devices[di]._y = String(Math.round(y));
           card.style.left = x + "px"; card.style.top = y + "px";
@@ -1360,6 +1397,10 @@
       if (cfg.autoWatch) $("autoWatch").checked = true;
       $("devDynamics").checked = !!cfg.devDynamics;
       devices = Array.isArray(cfg.devices) ? cfg.devices.map(normalizeDevice) : [];
+      if (cfg.boardPos) {
+        boardX = Number(cfg.boardPos.x) || 0;
+        boardY = Number(cfg.boardPos.y) || 0;
+      }
       renderDevices();
     } catch (_) { renderDevices(); }
   }
@@ -1384,6 +1425,7 @@
       autoWatch: $("autoWatch").checked,
       devDynamics: $("devDynamics").checked,
       devices: JSON.parse(JSON.stringify(devices)),
+      boardPos: { x: boardX, y: boardY },
     };
   }
   function applyConfig(cfg) {
@@ -1391,6 +1433,10 @@
     $("autoWatch").checked = !!cfg.autoWatch;
     $("devDynamics").checked = !!cfg.devDynamics;
     devices = Array.isArray(cfg.devices) ? cfg.devices.map(normalizeDevice) : [];
+    if (cfg.boardPos) {
+      boardX = Number(cfg.boardPos.x) || 0;
+      boardY = Number(cfg.boardPos.y) || 0;
+    }
     renderDevices();
   }
   // 添加器件的类型下拉，列出模拟器建模的全部器件。
