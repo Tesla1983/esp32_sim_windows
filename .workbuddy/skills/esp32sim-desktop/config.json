@@ -1,0 +1,7 @@
+{
+  "sidecar": "dist/portable/esp32sim.exe",
+  "build_sidecar": "scripts/build-sidecar.ps1",
+  "stage_web": "scripts/stage-web.cjs",
+  "max_seconds": 8,
+  "operation_mode": 1
+}

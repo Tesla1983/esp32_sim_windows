@@ -73,6 +73,7 @@ cargo tauri build
 | `resources/web/` | 由 `stage-web.cjs` 生成的上游板面资源（含 embed 补丁，不入库） |
 | `patches/` | 对上游内核的本地改动，构建时 `git apply`（不入库的 `vendor/` 靠它复现） |
 | `firmware/` | 配合 `custom` 裸板的示例固件：SH1106（I2C）/ CO5300（QSPI），各带 README |
+| `.workbuddy/skills/` | 项目内 AI 技能：构建、跑仿真、解析 buslog、导出面板截图，统一 JSON 输出 |
 | `vendor/esp32sim/` | 上游源码（构建依赖，不入库） |
 
 ## 验收

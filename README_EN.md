@@ -84,6 +84,7 @@ Outputs:
 | `resources/web/` | Generated upstream board resources (with the embed patch; not checked in) |
 | `patches/` | Local kernel changes applied at build time (needed to reproduce the untracked `vendor/`) |
 | `firmware/` | Sample firmware for the `custom` bare board: SH1106 (I2C) / CO5300 (QSPI), each with its own README |
+| `.workbuddy/skills/` | Project-local AI skill: build, run, parse buslog and capture panel shots, all with JSON output |
 | `vendor/esp32sim/` | Upstream source (build dependency, not checked in) |
 
 ## Verification

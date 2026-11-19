@@ -31,7 +31,10 @@ node_modules/
 Thumbs.db
 Desktop.ini
 *.tmp
-/.workbuddy/
+# .workbuddy 里只发布项目技能（SKILL.md / config.json / scripts），状态与记忆不入库
+/.workbuddy/*
+!/.workbuddy/skills/
+/.workbuddy/state/
 
 # ── 不对外发布：开发过程、本机绝对路径、个人与设备信息 ──────────────
 # 开发计划与执行记录（含项目目录绝对路径、阶段验收数据）
