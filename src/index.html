@@ -273,14 +273,15 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cv-board-body { position: relative; padding: 4px 0 6px; }
   .cv-col { position: absolute; top: 6px; width: 104px; }
-  .cv-col.left { left: 8px; }
-  .cv-col.right { right: 8px; }
+  .cv-col.left { left: 0; }
+  .cv-col.right { right: 0; }
   .cv-row {
     position: relative; height: 16px; display: flex; align-items: center;
     font-family: Consolas, monospace; font-size: 10px; color: #aeb6c6;
   }
-  .cv-col.left .cv-row { justify-content: flex-end; padding-right: 14px; }
-  .cv-col.right .cv-row { justify-content: flex-start; padding-left: 14px; }
+  /* 圆点压在板子左右边框线上（像真实排针焊盘），丝印文字留在板内。 */
+  .cv-col.left .cv-row { justify-content: flex-start; padding-left: 14px; }
+  .cv-col.right .cv-row { justify-content: flex-end; padding-right: 14px; }
   .cv-pin {
     position: absolute; width: 10px; height: 10px; border-radius: 50%;
     background: #39414f; border: 1px solid #4a5464; cursor: crosshair;
@@ -288,8 +289,9 @@
   }
   /* 丝印文字不抢指针：落点必须命中圆点，否则从器件拖过来的线会"掉在字上"而失败。 */
   .cv-row > span:not(.cv-pin) { pointer-events: none; }
-  .cv-col.left .cv-pin { right: 0; }
-  .cv-col.right .cv-pin { left: 0; }
+  /* 圆点中心对齐板子边框：左列 -5px / 右列 calc(100% - 5px)，一半压在边框上。 */
+  .cv-col.left .cv-pin { left: -5px; right: auto; }
+  .cv-col.right .cv-pin { right: -5px; left: auto; }
   .cv-pin.io { background: #2b3a2f; border-color: #3ecf8e; }
   .cv-pin.pwr { background: #3a2b2b; border-color: #e24b4a; }
   .cv-pin.gnd { background: #2b2b2b; border-color: #8b93a7; }
