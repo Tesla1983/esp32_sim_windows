@@ -202,7 +202,7 @@
   #log .ln.warn { color: #f5c775; }
   /* 阶段一：只读引脚连线图 */
   #viewTabs {
-    position: absolute; top: 8px; right: 8px; z-index: 4;
+    position: absolute; top: 8px; right: 8px; z-index: 12;
     display: flex; gap: 6px;
   }
   #viewTabs button { padding: 4px 11px; font-size: 11.5px; background: rgba(23,26,33,.92); }
@@ -233,6 +233,12 @@
     border-bottom: 1px solid var(--line);
   }
   .cv-toolbar .cv-hint { font-size: 11px; color: #6b7385; margin-left: auto; }
+  .cv-exit {
+    font-size: 11.5px; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--accent); background: rgba(55,138,221,.14); color: #9cc8f5;
+    white-space: nowrap;
+  }
+  .cv-exit:hover { background: rgba(55,138,221,.28); color: #d5e8ff; }
   .cv-chip {
     font-size: 11.5px; padding: 4px 9px; border-radius: 7px; cursor: grab;
     border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
@@ -240,7 +246,10 @@
   }
   .cv-chip:hover { border-color: var(--accent); }
   .cv-surface { position: relative; width: 1040px; height: 780px; }
-  .cv-wires { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+  /* 连线要压在板子背景上，但不能压住 GPIO 圆点和器件卡：
+     板子/卡片保持 z-index:auto 按 DOM 顺序画，连线 z-index:1 压过板子背景，
+     圆点 z-index:2、卡片 z-index:4 再压在连线上。 */
+  .cv-wires { position: absolute; inset: 0; pointer-events: none; overflow: visible; z-index: 1; }
 
   .cv-board {
     position: absolute; left: 20px; top: 8px; width: 300px;
@@ -281,7 +290,7 @@
   .cv-col.right .cv-pin-label { left: -2px; }
 
   .cv-card {
-    position: absolute; width: 188px; border-radius: 10px;
+    position: absolute; width: 188px; border-radius: 10px; z-index: 4;
     background: #171a21; border: 1px solid #2a2f3a; user-select: none;
   }
   .cv-card-head {
@@ -310,8 +319,9 @@
   }
   .cv-addr span { font-size: 10.5px; color: #6b7385; white-space: nowrap; }
   .cv-temp { stroke-dasharray: 4 3; stroke-width: 1.5; fill: none; }
-  .cv-wire { stroke-width: 1.6; fill: none; }
+  .cv-wire { stroke-width: 2; fill: none; stroke-linecap: round; }
   .cv-wire.shared { stroke-dasharray: 6 3; }
+  .cv-jack { fill: none; stroke-width: 1.6; }
   .cv-empty { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.8; }
 </style>
 </head>
@@ -994,7 +1004,8 @@
     }).join("");
 
     host.innerHTML =
-      '<div class="cv-toolbar">' + chips +
+      '<div class="cv-toolbar">' +
+        '<button id="cvExit" class="cv-exit" type="button" title="回到板子视图">← 返回板子视图</button>' + chips +
         '<span class="cv-hint">拖器件到画布 → 从器件端子拉线到开发板引脚</span></div>' +
       '<div class="cv-surface">' +
         '<svg class="cv-wires"></svg>' +
@@ -1057,8 +1068,9 @@
       const b = centerIn(pins[g], surface);
       const color = BUS_COLOR[kindDef(d.kind).bus] || "#8b93a7";
       out += '<path class="cv-wire" d="' + curve(a.x, a.y, b.x, b.y) + '" stroke="' + color + '"/>';
-      out += '<circle cx="' + a.x + '" cy="' + a.y + '" r="3" fill="' + color + '"/>';
-      out += '<circle cx="' + b.x + '" cy="' + b.y + '" r="3" fill="' + color + '"/>';
+      // 器件端画实心小点；GPIO 端画空心环，套在圆点外侧，像 Wokwi 那样一眼看到线接到哪个脚。
+      out += '<circle cx="' + a.x + '" cy="' + a.y + '" r="3.5" fill="' + color + '" stroke="#0b0d11" stroke-width="1"/>';
+      out += '<circle class="cv-jack" cx="' + b.x + '" cy="' + b.y + '" r="8" stroke="' + color + '"/>';
     });
     svg.innerHTML = out;
   }
@@ -1067,6 +1079,9 @@
     const host = $("canvas");
     const surface = host.querySelector(".cv-surface");
     if (!surface) return;
+
+    const exitBtn = host.querySelector("#cvExit");
+    if (exitBtn) exitBtn.addEventListener("click", () => setView("board"));
 
     // 颜色芯片 → 拖到画布添加器件
     host.querySelectorAll(".cv-chip").forEach((chip) => {
