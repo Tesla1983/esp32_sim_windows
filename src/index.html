@@ -219,6 +219,93 @@
   .pm-empty { color: var(--muted); font-size: 13px; line-height: 1.8; padding: 34px 28px; text-align: center; }
   .pm-hit { cursor: pointer; }
   .pm-hit:hover { fill: rgba(55,138,221,.14); }
+
+  /* ── 阶段二：接线画布 ───────────────────────────────────────── */
+  #canvas {
+    position: absolute; inset: 0; display: none; overflow: auto;
+    background: #0b0d11; scrollbar-width: thin; scrollbar-color: #3a4152 #12151c;
+  }
+  #canvas.on { display: block; }
+  .cv-toolbar {
+    position: sticky; top: 0; left: 0; z-index: 6;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 7px 10px; background: rgba(15,17,21,.94);
+    border-bottom: 1px solid var(--line);
+  }
+  .cv-toolbar .cv-hint { font-size: 11px; color: #6b7385; margin-left: auto; }
+  .cv-chip {
+    font-size: 11.5px; padding: 4px 9px; border-radius: 7px; cursor: grab;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    user-select: none; white-space: nowrap;
+  }
+  .cv-chip:hover { border-color: var(--accent); }
+  .cv-surface { position: relative; width: 1040px; height: 780px; }
+  .cv-wires { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+
+  .cv-board {
+    position: absolute; left: 22px; top: 20px; width: 268px;
+    border-radius: 12px; background: #10151c; border: 1px solid #2a3444;
+  }
+  .cv-board-head { padding: 9px 12px 4px; }
+  .cv-board-head b { font-size: 12.5px; font-weight: 500; color: #e6eaf2; }
+  .cv-board-head span { display: block; font-size: 10.5px; color: #6b7385; margin-top: 2px; }
+  .cv-board-body { position: relative; padding: 6px 0 10px; }
+  .cv-col { position: absolute; top: 6px; width: 104px; }
+  .cv-col.left { left: 8px; }
+  .cv-col.right { right: 8px; }
+  .cv-row {
+    position: relative; height: 26px; display: flex; align-items: center;
+    font-family: Consolas, monospace; font-size: 10.5px; color: #aeb6c6;
+  }
+  .cv-col.left .cv-row { justify-content: flex-end; padding-right: 16px; }
+  .cv-col.right .cv-row { justify-content: flex-start; padding-left: 16px; }
+  .cv-pin {
+    position: absolute; width: 10px; height: 10px; border-radius: 50%;
+    background: #39414f; border: 1px solid #4a5464; cursor: crosshair;
+  }
+  .cv-col.left .cv-pin { right: 0; }
+  .cv-col.right .cv-pin { left: 0; }
+  .cv-pin.io { background: #2b3a2f; border-color: #3ecf8e; }
+  .cv-pin.pwr { background: #3a2b2b; border-color: #e24b4a; }
+  .cv-pin.gnd { background: #2b2b2b; border-color: #8b93a7; }
+  .cv-pin.uart { background: #2b3340; border-color: #378add; }
+  .cv-pin.warn { box-shadow: 0 0 0 2px rgba(239,159,39,.35); }
+  .cv-pin.drop { box-shadow: 0 0 0 3px rgba(62,207,142,.75); background: #1f6b4a; }
+  .cv-pin.bad { cursor: not-allowed; opacity: .45; }
+  .cv-pin-label { position: absolute; top: 11px; font-size: 9.5px; color: #5c6478; white-space: nowrap; }
+  .cv-col.left .cv-pin-label { right: -2px; }
+  .cv-col.right .cv-pin-label { left: -2px; }
+
+  .cv-card {
+    position: absolute; width: 188px; border-radius: 10px;
+    background: #171a21; border: 1px solid #2a2f3a; user-select: none;
+  }
+  .cv-card-head {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border-bottom: 1px solid #232833; cursor: grab;
+  }
+  .cv-card-head b { font-size: 11.5px; font-weight: 500; color: #e6eaf2; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cv-card-head .cv-del { padding: 0 5px; font-size: 12px; line-height: 16px; }
+  .cv-card-body { padding: 5px 8px 7px; }
+  .cv-term {
+    display: flex; align-items: center; gap: 6px; height: 21px;
+    font-size: 10.5px; color: #aeb6c6; cursor: crosshair;
+  }
+  .cv-term .dot { width: 9px; height: 9px; border-radius: 50%; background: #39414f; border: 1px solid #4a5464; flex: 0 0 auto; }
+  .cv-term.on .dot { background: var(--accent); border-color: #7fb4f0; }
+  .cv-term .role { flex: 1; font-family: Consolas, monospace; }
+  .cv-term .val { color: #6b7385; font-family: Consolas, monospace; font-size: 10px; }
+  .cv-term.on .val { color: #c8cfdd; }
+  .cv-note { font-size: 10.5px; color: #6b7385; line-height: 1.5; margin-top: 2px; }
+  .cv-addr { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+  .cv-addr input {
+    width: 100%; margin: 0; padding: 3px 6px; height: 24px; font-size: 11px;
+  }
+  .cv-addr span { font-size: 10.5px; color: #6b7385; white-space: nowrap; }
+  .cv-temp { stroke-dasharray: 4 3; stroke-width: 1.5; fill: none; }
+  .cv-wire { stroke-width: 1.6; fill: none; }
+  .cv-wire.shared { stroke-dasharray: 6 3; }
+  .cv-empty { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.8; }
 </style>
 </head>
 <body>
@@ -341,8 +428,10 @@
       <div id="viewTabs">
         <button id="tabBoard" class="active" type="button">板子视图</button>
         <button id="tabPins" type="button">引脚图</button>
+        <button id="tabCanvas" type="button">接线画布</button>
       </div>
       <div id="pinmap"></div>
+      <div id="canvas"></div>
       <div id="placeholder">
         <div>配置固件后点击「运行」</div>
         <div class="hint">首次使用需要 mask ROM：放到项目 roms/ 目录，或让程序从 ESP-IDF 的 esp-rom-elfs 目录自动查找。</div>
@@ -384,7 +473,7 @@
   const kindDef = (kind) => DEVICE_KINDS.find((k) => k.v === kind) || DEVICE_KINDS[0];
   const isI2c = (kind) => kindDef(kind).bus === "i2c";
   let devices = [];
-  let pinView = false;
+  let viewMode = "board";
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const kindOptions = (sel) => DEVICE_KINDS.map((k) => '<option value="' + k.v + '"' + (sel === k.v ? " selected" : "") + ">" + k.label + "</option>").join("");
@@ -413,6 +502,9 @@
       const taken = (bus) => devices.some((x) => isI2c(x.kind) && String(x.bus) === String(bus) && parseInt(x.addr, 16) === want);
       d.bus = !taken("0") ? "0" : !taken("1") ? "1" : "0";
       if (taken(d.bus)) d.addr = nextFreeAddr(d.bus, d.addr);
+      // 画布上的 I2C 连线以 SDA/SCL 引脚对区分总线；新器件给该总线的默认引脚对。
+      const pair = I2C_BUS_DEFAULT[d.bus] || I2C_BUS_DEFAULT["0"];
+      d.sda = pair.sda; d.scl = pair.scl;
     }
     return d;
   }
@@ -430,6 +522,9 @@
   }
 
   function renderDevices() {
+    // 先补齐画布布局与 I2C 总线归属，再渲染表单，避免下拉框显示过期的总线号。
+    ensureLayout();
+    refreshI2cBuses();
     const host = $("deviceRows");
     host.innerHTML = "";
     devices.forEach((d, i) => {
@@ -473,8 +568,12 @@
           row.querySelectorAll("[data-key]").forEach((x) => { d[x.dataset.key] = x.value.trim(); });
           // 换总线时地址可能与新总线上的器件撞车，自动让到第一个空闲地址。
           if (el.dataset.key === "bus" && isI2c(d.kind)) {
+            // 换总线 = 换一组 SDA/SCL 引脚，画布上的连线随之更新。
+            const pair = I2C_BUS_DEFAULT[d.bus] || I2C_BUS_DEFAULT["0"];
+            d.sda = pair.sda; d.scl = pair.scl;
             const free = nextFreeAddr(d.bus, d.addr);
             if (free !== d.addr) { d.addr = free; renderDevices(); saveConfig(); return; }
+            if (viewMode === "canvas") renderCanvas();
           }
           validateDevices();
           saveConfig();
@@ -496,18 +595,39 @@
     });
     $("devicesBox").style.display = $("board").value === "custom" ? "block" : "none";
     validateDevices();
-    if (pinView) renderPinmap();
+    if (viewMode === "pins") renderPinmap();
+    if (viewMode === "canvas") renderCanvas();
   }
-  const isPin = (v) => /^\d+$/.test(String(v)) && Number(v) <= 48;
+  // S3 没有 GPIO22–25，其余 0–48 才可能出现在排针上。
+  const isPin = (v) => /^\d+$/.test(String(v)) && Number(v) <= 48 && !(Number(v) >= 22 && Number(v) <= 25);
   const isPosInt = (v, max) => /^\d+$/.test(String(v)) && Number(v) >= 1 && Number(v) <= max;
 
   function validateDevices() {
     const err = $("deviceErr");
     if ($("board").value !== "custom") { err.textContent = ""; return true; }
     if (!devices.length) { err.textContent = "至少添加一个器件。"; return false; }
+    ensureLayout();
+    if (i2cBusOverflow) {
+      err.textContent = "I2C 只能有两条总线：同一组 SDA/SCL 引脚才算同一条，请把多出来的第三组改回前两组之一。";
+      return false;
+    }
     const seen = new Set();
+    const exclusive = new Map(); // gpio -> "器件名 · 角色"
+    const claim = (g, who) => {
+      if (pinBlocked(Number(g))) {
+        err.textContent = "GPIO " + g + " 不可用（" + ((PIN_NOTES[Number(g)] && PIN_NOTES[Number(g)].t) || "保留引脚") + "）。";
+        return false;
+      }
+      if (exclusive.has(String(g))) {
+        err.textContent = "GPIO " + g + " 被重复占用：" + exclusive.get(String(g)) + " 与 " + who + "。";
+        return false;
+      }
+      exclusive.set(String(g), who);
+      return true;
+    };
     for (const d of devices) {
       const bus = kindDef(d.kind).bus;
+      const name = kindDef(d.kind).label.replace(/（.*?）/g, "");
       if (bus === "i2c") {
         if (!/^0x[0-9a-fA-F]{1,2}$/.test(String(d.addr))) {
           err.textContent = "I2C 地址要写成 0x76 这样的十六进制（1–2 位）。";
@@ -518,6 +638,10 @@
           err.textContent = "I2C 地址超出 7-bit 范围（0x03–0x77）。";
           return false;
         }
+        if (!isPin(d.sda) || !isPin(d.scl) || String(d.sda) === String(d.scl)) {
+          err.textContent = name + " 需要两条不同的 SDA / SCL 有效引脚（0–48）。";
+          return false;
+        }
         const key = d.bus + ":" + v;
         if (seen.has(key)) { err.textContent = "同一 I2C 总线上地址冲突：" + d.addr + "。"; return false; }
         seen.add(key);
@@ -526,11 +650,14 @@
           err.textContent = "WS2812 需要有效的数据引脚（0–48）和 1–2048 的 LED 数量。";
           return false;
         }
+        if (!claim(d.pin, name)) return false;
       } else if (bus === "spi") {
         if (![d.sclk, d.mosi, d.cs, d.dc].every(isPin)) {
-          err.textContent = "ST7735 需要 SCLK / MOSI / CS / DC 四个有效引脚（0–48）。";
+          err.textContent = "SPI 屏需要 SCLK / MOSI / CS / DC 四个有效引脚（0–48）。";
           return false;
         }
+        // SCLK/MOSI 可多器件共享（同一组 SPI 总线），CS/DC 必须独占。
+        if (!claim(d.cs, name + " CS") || !claim(d.dc, name + " " + (d.kind === "nt7534" ? "RS" : "DC"))) return false;
       } else if (bus === "qspi") {
         if (!isPin(d.host) || !isPosInt(d.width, 1024) || !isPosInt(d.height, 1024)) {
           err.textContent = "CO5300 需要有效 SPI host（0–48）和 1–1024 的宽高。";
@@ -705,6 +832,353 @@
     });
   }
 
+  // ---- 阶段二：接线画布（按 DevKitC-1 丝印引脚连线） ----
+  // 丝印 J1 / J3 各 22 脚，丝印数字即 GPIO 号（官方 esp-dev-kits 文档）。
+  const S3_J1 = [
+    { n: "3V3", k: "pwr" }, { n: "3V3", k: "pwr" }, { n: "RST", k: "pwr" },
+    { n: "4", g: 4 }, { n: "5", g: 5 }, { n: "6", g: 6 }, { n: "7", g: 7 },
+    { n: "15", g: 15 }, { n: "16", g: 16 }, { n: "17", g: 17 }, { n: "18", g: 18 },
+    { n: "8", g: 8 }, { n: "3", g: 3 }, { n: "46", g: 46 }, { n: "9", g: 9 },
+    { n: "10", g: 10 }, { n: "11", g: 11 }, { n: "12", g: 12 }, { n: "13", g: 13 },
+    { n: "14", g: 14 }, { n: "5V", k: "pwr" }, { n: "G", k: "gnd" },
+  ];
+  const S3_J3 = [
+    { n: "G", k: "gnd" }, { n: "TX", g: 43, k: "uart" }, { n: "RX", g: 44, k: "uart" },
+    { n: "1", g: 1 }, { n: "2", g: 2 }, { n: "42", g: 42 }, { n: "41", g: 41 },
+    { n: "40", g: 40 }, { n: "39", g: 39 }, { n: "38", g: 38 },
+    { n: "37", g: 37 }, { n: "36", g: 36 }, { n: "35", g: 35 },
+    { n: "0", g: 0 }, { n: "45", g: 45 }, { n: "48", g: 48 }, { n: "47", g: 47 },
+    { n: "21", g: 21 }, { n: "20", g: 20 }, { n: "19", g: 19 },
+    { n: "G", k: "gnd" }, { n: "G", k: "gnd" },
+  ];
+
+  // 引脚备注：blocked 不可连，warn 可连但需提示。
+  const PIN_NOTES = {
+    0: { t: "Strapping / BOOT 键", warn: true },
+    3: { t: "Strapping", warn: true },
+    45: { t: "Strapping", warn: true },
+    46: { t: "Strapping", warn: true },
+    19: { t: "USB D-", blocked: true },
+    20: { t: "USB D+", blocked: true },
+    43: { t: "UART0 TX（控制台）", warn: true },
+    44: { t: "UART0 RX（控制台）", warn: true },
+    38: { t: "板载 RGB LED", warn: true },
+    35: { t: "八线 PSRAM 占用", psram: true },
+    36: { t: "八线 PSRAM 占用", psram: true },
+    37: { t: "八线 PSRAM 占用", psram: true },
+  };
+
+  // 默认两条 I2C 总线对应的 SDA/SCL 引脚；画布上同一条 SDA/SCL 对 = 同一条总线。
+  const I2C_BUS_DEFAULT = { "0": { sda: "8", scl: "9" }, "1": { sda: "4", scl: "5" } };
+
+  let canvasTimer = 0;
+  let i2cBusOverflow = false;
+
+  function pinBlocked(gpio) {
+    const note = PIN_NOTES[gpio];
+    if (!note) return false;
+    if (note.blocked) return true;
+    if (note.psram && Number($("psramMb").value || 0) >= 8) return true;
+    return false;
+  }
+
+  /// 器件的可连线端子。key 直接对应 devices 对象上的字段名。
+  function deviceTerminals(d) {
+    const bus = kindDef(d.kind).bus;
+    if (bus === "i2c") return [{ key: "sda", role: "SDA" }, { key: "scl", role: "SCL" }];
+    if (bus === "gpio") return [{ key: "pin", role: "DIN" }];
+    if (bus === "spi") return [
+      { key: "sclk", role: "SCLK" }, { key: "mosi", role: "MOSI" },
+      { key: "cs", role: "CS" }, { key: "dc", role: d.kind === "nt7534" ? "RS" : "DC" },
+    ];
+    return [];
+  }
+
+  function ensureLayout() {
+    let i = 0;
+    devices.forEach((d) => {
+      if (d._x == null || d._x === "" || d._y == null || d._y === "") {
+        d._x = String(320 + (i % 3) * 210);
+        d._y = String(24 + Math.floor(i / 3) * 168);
+      }
+      if (kindDef(d.kind).bus === "i2c") {
+        const def = I2C_BUS_DEFAULT[String(d.bus)] || I2C_BUS_DEFAULT["0"];
+        if (!d.sda) d.sda = def.sda;
+        if (!d.scl) d.scl = def.scl;
+      }
+      i++;
+    });
+  }
+
+  /// 同一条 SDA/SCL 引脚对归为同一条总线。默认两组引脚分别锚定 I2C0 / I2C1，
+  /// 这样表单里显式选的总线不会被顺序打乱；自定义引脚对占用剩余空闲总线，两条都占则报错。
+  const I2C_PAIR_ANCHOR = { "8/9": "0", "4/5": "1" };
+  function refreshI2cBuses() {
+    i2cBusOverflow = false;
+    const used = new Map(); // "sda/scl" -> bus
+    devices.forEach((d) => {
+      if (kindDef(d.kind).bus !== "i2c") return;
+      if (!d.sda || !d.scl) {
+        const def = I2C_BUS_DEFAULT[String(d.bus)] || I2C_BUS_DEFAULT["0"];
+        d.sda = def.sda; d.scl = def.scl;
+      }
+      const key = d.sda + "/" + d.scl;
+      let bus = used.has(key) ? used.get(key) : I2C_PAIR_ANCHOR[key];
+      if (bus === undefined) {
+        const taken = new Set(used.values());
+        bus = !taken.has("0") ? "0" : !taken.has("1") ? "1" : null;
+      }
+      if (bus === null) { i2cBusOverflow = true; return; }
+      used.set(key, bus);
+      d.bus = bus;
+    });
+  }
+  // 兼容旧调用名
+  const recomputeI2cBuses = refreshI2cBuses;
+
+  const centerIn = (el, root) => {
+    const r = el.getBoundingClientRect();
+    const s = root.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - s.left, y: r.top + r.height / 2 - s.top };
+  };
+
+  function renderCanvas() {
+    const host = $("canvas");
+    if ($("board").value !== "custom") {
+      host.innerHTML = '<div class="cv-empty">接线画布只对「custom 裸板 + 自由搭配器件」可用。<br>在左侧把板子切到 custom，然后点上方器件条拖到画布上。</div>';
+      return;
+    }
+    ensureLayout();
+    const chips = DEVICE_KINDS.map((k) =>
+      '<div class="cv-chip" data-kind="' + k.v + '">＋ ' + esc(k.label.replace(/（.*?）/g, "")) + "</div>").join("");
+
+    const pinHtml = (p, side) => {
+      const blocked = p.g != null && pinBlocked(p.g);
+      const cls = ["cv-pin", p.k === "pwr" ? "pwr" : p.k === "gnd" ? "gnd" : p.k === "uart" ? "uart" : "io"];
+      if (p.g != null && PIN_NOTES[p.g] && !blocked) cls.push("warn");
+      if (blocked) cls.push("bad");
+      const title = p.g != null ? (PIN_NOTES[p.g] ? PIN_NOTES[p.g].t : "GPIO " + p.g) : (p.k === "pwr" ? "电源" : "地");
+      return '<div class="cv-row">' + (side === "right" ? "" : "") +
+        '<span class="' + cls.join(" ") + '"' +
+        (p.g != null ? ' data-gpio="' + p.g + '"' : ' data-nopin="1"') +
+        ' title="' + esc(title) + '"></span>' +
+        '<span>' + esc(p.n) + "</span></div>";
+    };
+
+    const cards = devices.map((d, di) => {
+      const label = kindDef(d.kind).label;
+      const terms = deviceTerminals(d).map((t) => {
+        const v = d[t.key] || "";
+        return '<div class="cv-term' + (v ? " on" : "") + '" data-dev="' + di + '" data-key="' + t.key + '" title="拖到右侧开发板引脚；双击断开">' +
+          '<i class="dot"></i><span class="role">' + t.role + '</span><span class="val">' + (v ? "GPIO " + esc(v) : "未连") + "</span></div>";
+      }).join("");
+      let extra = "";
+      if (kindDef(d.kind).bus === "i2c") {
+        extra = '<div class="cv-addr"><span>地址</span><input data-dev="' + di + '" data-field="addr" value="' + esc(d.addr || "") + '" placeholder="0x76"></div>';
+      } else if (kindDef(d.kind).bus === "qspi") {
+        extra = '<div class="cv-note">QSPI 由 host 直连建模，无需逐脚连线。</div>';
+      }
+      return '<div class="cv-card" data-dev="' + di + '">' +
+        '<div class="cv-card-head"><b>' + esc(label) + '</b><button type="button" class="small cv-del">×</button></div>' +
+        '<div class="cv-card-body">' + terms + extra + "</div></div>";
+    }).join("");
+
+    host.innerHTML =
+      '<div class="cv-toolbar">' + chips +
+        '<span class="cv-hint">拖器件到画布 → 从器件端子拉线到开发板引脚</span></div>' +
+      '<div class="cv-surface">' +
+        '<svg class="cv-wires"></svg>' +
+        '<div class="cv-board">' +
+          '<div class="cv-board-head"><b>ESP32-S3-DevKitC-1</b><span>丝印与 GPIO 编号一致 · 八线 PSRAM 时 35/36/37 不可用</span></div>' +
+          '<div class="cv-board-body">' +
+            '<div class="cv-col left">' + S3_J1.map((p) => pinHtml(p, "left")).join("") + "</div>" +
+            '<div class="cv-col right">' + S3_J3.map((p) => pinHtml(p, "right")).join("") + "</div>" +
+          "</div>" +
+        "</div>" + cards +
+      "</div>";
+
+    // 注意：WebView2 的 CSP 会忽略 innerHTML 注入的 style 属性（cssText 解析为空），
+    // 所以位置与高度必须用 CSSOM 逐个赋值，不能写进 HTML 字符串。
+    host.querySelectorAll(".cv-card").forEach((c) => {
+      const d = devices[Number(c.dataset.dev)];
+      if (!d) return;
+      c.style.left = Number(d._x) + "px";
+      c.style.top = Number(d._y) + "px";
+    });
+    const boardBody = host.querySelector(".cv-board-body");
+    if (boardBody) boardBody.style.height = (S3_J1.length * 26 + 16) + "px";
+
+    shrinkSurface();
+    drawWires();
+    bindCanvas();
+  }
+
+  function shrinkSurface() {
+    const surface = $("canvas").querySelector(".cv-surface");
+    if (!surface) return;
+    let maxY = 420;
+    surface.querySelectorAll(".cv-card").forEach((c) => {
+      maxY = Math.max(maxY, c.offsetTop + c.offsetHeight + 40);
+    });
+    surface.style.height = maxY + "px";
+    const svg = surface.querySelector(".cv-wires");
+    if (svg) { svg.setAttribute("width", surface.offsetWidth); svg.setAttribute("height", surface.offsetHeight); }
+  }
+
+  const curve = (x1, y1, x2, y2) => {
+    const mx = (x1 + x2) / 2;
+    return "M " + x1 + " " + y1 + " C " + mx + " " + y1 + ", " + mx + " " + y2 + ", " + x2 + " " + y2;
+  };
+
+  function drawWires() {
+    const surface = $("canvas").querySelector(".cv-surface");
+    const svg = surface && surface.querySelector(".cv-wires");
+    if (!svg) return;
+    const pins = {};
+    surface.querySelectorAll(".cv-pin[data-gpio]").forEach((p) => { pins[p.dataset.gpio] = p; });
+    let out = "";
+    surface.querySelectorAll(".cv-term").forEach((t) => {
+      const dev = t.dataset.dev, key = t.dataset.key;
+      const d = devices[Number(dev)];
+      if (!d) return;
+      const g = d[key];
+      if (!g || !pins[g]) return;
+      const a = centerIn(t.querySelector(".dot"), surface);
+      const b = centerIn(pins[g], surface);
+      const color = BUS_COLOR[kindDef(d.kind).bus] || "#8b93a7";
+      out += '<path class="cv-wire" d="' + curve(a.x, a.y, b.x, b.y) + '" stroke="' + color + '"/>';
+      out += '<circle cx="' + a.x + '" cy="' + a.y + '" r="3" fill="' + color + '"/>';
+      out += '<circle cx="' + b.x + '" cy="' + b.y + '" r="3" fill="' + color + '"/>';
+    });
+    svg.innerHTML = out;
+  }
+
+  function bindCanvas() {
+    const host = $("canvas");
+    const surface = host.querySelector(".cv-surface");
+    if (!surface) return;
+
+    // 颜色芯片 → 拖到画布添加器件
+    host.querySelectorAll(".cv-chip").forEach((chip) => {
+      chip.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        const ghost = chip.cloneNode(true);
+        ghost.style.cssText += "position:fixed;z-index:9999;pointer-events:none;opacity:.85;transform:translate(-50%,-50%);";
+        document.body.appendChild(ghost);
+        const move = (ev) => { ghost.style.left = ev.clientX + "px"; ghost.style.top = ev.clientY + "px"; };
+        move(e);
+        const up = (ev) => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+          ghost.remove();
+          const r = surface.getBoundingClientRect();
+          if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
+          const d = newDevice(chip.dataset.kind);
+          d._x = String(Math.max(300, ev.clientX - r.left - 94));
+          d._y = String(Math.max(8, ev.clientY - r.top - 20));
+          devices.push(d);
+          renderDevices(); renderCanvas(); saveConfig();
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up);
+      });
+    });
+
+    // 卡片拖动
+    surface.querySelectorAll(".cv-card").forEach((card) => {
+      const di = Number(card.dataset.dev);
+      card.querySelector(".cv-card-head").addEventListener("pointerdown", (e) => {
+        if (e.target.closest(".cv-del")) return;
+        e.preventDefault();
+        const r = surface.getBoundingClientRect();
+        const ox = e.clientX - r.left - Number(devices[di]._x);
+        const oy = e.clientY - r.top - Number(devices[di]._y);
+        const move = (ev) => {
+          const x = Math.max(0, ev.clientX - r.left - ox);
+          const y = Math.max(0, ev.clientY - r.top - oy);
+          devices[di]._x = String(Math.round(x));
+          devices[di]._y = String(Math.round(y));
+          card.style.left = x + "px"; card.style.top = y + "px";
+          drawWires();
+        };
+        const up = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+          shrinkSurface(); drawWires(); saveConfig();
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up);
+      });
+    });
+
+    // 端子拉线
+    surface.querySelectorAll(".cv-term").forEach((term) => {
+      const di = Number(term.dataset.dev), key = term.dataset.key;
+      term.addEventListener("dblclick", () => {
+        devices[di][key] = "";
+        recomputeI2cBuses();
+        renderDevices(); renderCanvas(); saveConfig();
+      });
+      term.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        const svg = surface.querySelector(".cv-wires");
+        const a = centerIn(term.querySelector(".dot"), surface);
+        const tmp = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        tmp.setAttribute("class", "cv-temp");
+        tmp.setAttribute("stroke", BUS_COLOR[kindDef(devices[di].kind).bus] || "#8b93a7");
+        svg.appendChild(tmp);
+        let lastPin = null;
+        const move = (ev) => {
+          const r = surface.getBoundingClientRect();
+          const x = ev.clientX - r.left, y = ev.clientY - r.top;
+          tmp.setAttribute("d", curve(a.x, a.y, x, y));
+          const el = document.elementFromPoint(ev.clientX, ev.clientY);
+          const pin = el && el.closest ? el.closest(".cv-pin[data-gpio]") : null;
+          if (pin !== lastPin) {
+            if (lastPin) lastPin.classList.remove("drop");
+            if (pin && !pin.classList.contains("bad")) pin.classList.add("drop");
+            lastPin = pin;
+          }
+        };
+        const up = (ev) => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+          tmp.remove();
+          if (lastPin) lastPin.classList.remove("drop");
+          const el = document.elementFromPoint(ev.clientX, ev.clientY);
+          const pin = el && el.closest ? el.closest(".cv-pin[data-gpio]") : null;
+          if (!pin) return;
+          if (pin.classList.contains("bad")) {
+            const g = pin.dataset.gpio;
+            banner("GPIO " + g + " 不可用：" + ((PIN_NOTES[g] && PIN_NOTES[g].t) || "保留引脚"), "warn");
+            return;
+          }
+          devices[di][key] = pin.dataset.gpio;
+          recomputeI2cBuses();
+          renderDevices(); renderCanvas(); saveConfig();
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up);
+      });
+    });
+
+    surface.querySelectorAll(".cv-del").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        const card = e.target.closest(".cv-card");
+        devices.splice(Number(card.dataset.dev), 1);
+        recomputeI2cBuses();
+        renderDevices(); renderCanvas(); saveConfig();
+      });
+    });
+
+    surface.querySelectorAll(".cv-addr input").forEach((inp) => {
+      inp.addEventListener("change", () => {
+        devices[Number(inp.dataset.dev)].addr = inp.value.trim();
+        renderDevices(); renderCanvas(); saveConfig();
+      });
+    });
+  }
+
   const fields = ["chip", "board", "buildDir", "bootloader", "ptable", "app", "elf", "romPath",
                   "flashMb", "psramMb", "wifiSsid", "wifiPsk", "tftPng", "wav", "vcd", "buslog"];
   const storeKey = "esp32sim-desktop.config";
@@ -760,6 +1234,12 @@
   // 添加器件的类型下拉，列出模拟器建模的全部器件。
   $("newKind").innerHTML = kindOptions("bmp280");
   fields.forEach((k) => $(k).addEventListener("change", saveConfig));
+  // PSRAM 大小决定 35/36/37 是否被八线 PSRAM 占用，改动后要重画引脚图。
+  $("psramMb").addEventListener("change", () => {
+    if (viewMode === "canvas") renderCanvas();
+    if (viewMode === "pins") renderPinmap();
+    validateDevices();
+  });
   $("board").addEventListener("change", () => {
     if ($("board").value === "custom" && !devices.length) {
       devices.push(newDevice("bmp280"));
@@ -773,25 +1253,30 @@
     saveConfig();
   });
 
-  // 视图切换：板子（iframe）/ 引脚图。引脚图只读，不改变仿真与表单。
-  function setView(pins) {
-    pinView = pins;
-    $("tabBoard").classList.toggle("active", !pins);
+  // 视图切换：板子（iframe）/ 引脚图（只读）/ 接线画布（可拖线编辑）。
+  function setView(mode) {
+    viewMode = mode;
+    const pins = mode === "pins", canvas = mode === "canvas", board = mode === "board";
+    $("tabBoard").classList.toggle("active", board);
     $("tabPins").classList.toggle("active", pins);
-    // 用 .fit 控制显示（flex + 缩放）；内联 display 会盖过类样式，故不设内联。
+    $("tabCanvas").classList.toggle("active", canvas);
+    // 用 .fit / .on 控制显示；内联 display 会盖过类样式，故不设内联。
     $("pinmap").classList.toggle("fit", pins);
-    if (pins) {
-      $("boardFrame").style.display = "none";
-      $("placeholder").style.display = "none";
-      renderPinmap();
-    } else {
+    $("canvas").classList.toggle("on", canvas);
+    if (board) {
       // 回到板子视图时按运行状态恢复，和 startSim/stopSim 的显示逻辑保持一致。
       $("boardFrame").style.display = running ? "block" : "none";
       $("placeholder").style.display = running ? "none" : "flex";
+    } else {
+      $("boardFrame").style.display = "none";
+      $("placeholder").style.display = "none";
+      if (pins) renderPinmap();
+      if (canvas) renderCanvas();
     }
   }
-  $("tabBoard").addEventListener("click", () => setView(false));
-  $("tabPins").addEventListener("click", () => setView(true));
+  $("tabBoard").addEventListener("click", () => setView("board"));
+  $("tabPins").addEventListener("click", () => setView("pins"));
+  $("tabCanvas").addEventListener("click", () => setView("canvas"));
   $("devDynamics").addEventListener("change", saveConfig);
   $("autoWatch").addEventListener("change", () => {
     saveConfig();
@@ -904,8 +1389,8 @@
       $("placeholder").style.display = "none";
       $("boardFrame").style.display = "block";
       $("boardFrame").src = "http://127.0.0.1:" + port + "/?embed=1";
-      // 若当前停在引脚图，启动后仍保持在引脚图（不把画布顶掉）。
-      if (pinView) setView(true);
+      // 若当前停在引脚图/画布，启动后仍保持在原视图（不把画布顶掉）。
+      if (viewMode !== "board") setView(viewMode);
       $("btnStop").disabled = false;
       $("btnRun").disabled = false;   // 运行中允许再次点击：内部会先停旧进程
       setStatus("运行中", "on");
@@ -928,7 +1413,9 @@
     currentPort = 0;
     $("boardFrame").src = "about:blank";
     $("boardFrame").style.display = "none";
-    if (pinView) { renderPinmap(); } else { $("placeholder").style.display = "flex"; }
+    if (viewMode === "pins") { renderPinmap(); }
+    else if (viewMode === "canvas") { renderCanvas(); }
+    else { $("placeholder").style.display = "flex"; }
     $("btnRun").disabled = false;
     $("btnStop").disabled = true;
     if (!silent) {
