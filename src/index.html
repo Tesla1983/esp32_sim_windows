@@ -222,16 +222,24 @@
 
   /* ── 阶段二：接线画布 ───────────────────────────────────────── */
   #canvas {
-    position: absolute; inset: 0; display: none; overflow: auto;
+    position: absolute; inset: 0; display: none; overflow: hidden;
     background: #0b0d11; scrollbar-width: thin; scrollbar-color: #3a4152 #12151c;
   }
-  #canvas.on { display: block; }
+  #canvas.on { display: flex; flex-direction: column; }
   .cv-toolbar {
-    position: sticky; top: 0; left: 0; z-index: 6;
+    position: relative; flex: 0 0 auto; z-index: 6;
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    padding: 7px 10px; background: rgba(15,17,21,.94);
+    padding: 7px 10px; background: #0f1115;
     border-bottom: 1px solid var(--line);
   }
+  .cv-zoom { display: flex; align-items: center; gap: 3px; }
+  .cv-zoom button { padding: 3px 8px; font-size: 11.5px; min-width: 26px; }
+  .cv-zoom span { font-family: Consolas, monospace; font-size: 10.5px; color: #8b93a7; min-width: 38px; text-align: center; }
+  .cv-viewport {
+    position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+    cursor: grab; touch-action: none;
+  }
+  .cv-viewport.panning { cursor: grabbing; }
   .cv-toolbar .cv-hint { font-size: 11px; color: #6b7385; margin-left: auto; }
   .cv-exit {
     font-size: 11.5px; padding: 4px 10px; border-radius: 7px; cursor: pointer;
@@ -245,7 +253,10 @@
     user-select: none; white-space: nowrap;
   }
   .cv-chip:hover { border-color: var(--accent); }
-  .cv-surface { position: relative; width: 1040px; height: 780px; }
+  .cv-surface {
+    position: absolute; left: 0; top: 0; width: 1040px; height: 780px;
+    transform-origin: 0 0; will-change: transform;
+  }
   /* 连线要压在板子背景上，但不能压住 GPIO 圆点和器件卡：
      板子/卡片保持 z-index:auto 按 DOM 顺序画，连线 z-index:1 压过板子背景，
      圆点 z-index:2、卡片 z-index:4 再压在连线上。 */
@@ -899,6 +910,11 @@
   // 引脚只在画布上真正连线后才下发；总线号由用户显式选择（固件决定用哪个控制器）。
 
   let canvasTimer = 0;
+  // 画布视口：scale/位移作用在 surface 上，所有器件坐标仍是未缩放的 world 坐标。
+  let canvasScale = 1;
+  let canvasTx = 12;
+  let canvasTy = 8;
+  let canvasFitted = false;
 
   function pinBlocked(gpio) {
     const note = PIN_NOTES[gpio];
@@ -944,11 +960,63 @@
   // 兼容旧调用名
   const recomputeI2cBuses = refreshI2cBuses;
 
-  const centerIn = (el, root) => {
-    const r = el.getBoundingClientRect();
-    const s = root.getBoundingClientRect();
-    return { x: r.left + r.width / 2 - s.left, y: r.top + r.height / 2 - s.top };
+  const canvasViewport = () => $("canvas").querySelector(".cv-viewport");
+
+  /// 屏幕坐标 → 未缩放的 world 坐标。所有拖拽/连线都走这里，缩放后不会错位。
+  const canvasLocal = (clientX, clientY) => {
+    const r = canvasViewport() ? canvasViewport().getBoundingClientRect() : { left: 0, top: 0 };
+    return {
+      x: (clientX - r.left - canvasTx) / canvasScale,
+      y: (clientY - r.top - canvasTy) / canvasScale,
+    };
   };
+
+  const centerIn = (el) => {
+    const r = el.getBoundingClientRect();
+    return canvasLocal(r.left + r.width / 2, r.top + r.height / 2);
+  };
+
+  function applyCanvasTransform() {
+    const surface = $("canvas").querySelector(".cv-surface");
+    if (!surface) return;
+    surface.style.transform = "translate(" + canvasTx + "px," + canvasTy + "px) scale(" + canvasScale + ")";
+    const label = $("cvZoomLabel");
+    if (label) label.textContent = Math.round(canvasScale * 100) + "%";
+  }
+
+  /// 以光标为锚缩放：光标下的 world 点在缩放前后落在同一屏幕位置。
+  function canvasZoomAt(clientX, clientY, factor) {
+    const vp = canvasViewport();
+    if (!vp) return;
+    const r = vp.getBoundingClientRect();
+    const before = canvasLocal(clientX, clientY);
+    const next = Math.max(0.35, Math.min(2.5, canvasScale * factor));
+    canvasTx = clientX - r.left - before.x * next;
+    canvasTy = clientY - r.top - before.y * next;
+    canvasScale = next;
+    applyCanvasTransform();
+  }
+
+  /// 一屏放下开发板与所有器件卡。
+  function canvasFit() {
+    const vp = canvasViewport();
+    const surface = $("canvas").querySelector(".cv-surface");
+    if (!vp || !surface) return;
+    const boxes = [surface.querySelector(".cv-board")].concat([...surface.querySelectorAll(".cv-card")]).filter(Boolean);
+    if (!boxes.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    boxes.forEach((b) => {
+      x0 = Math.min(x0, b.offsetLeft); y0 = Math.min(y0, b.offsetTop);
+      x1 = Math.max(x1, b.offsetLeft + b.offsetWidth); y1 = Math.max(y1, b.offsetTop + b.offsetHeight);
+    });
+    const pad = 24;
+    const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+    const vpW = Math.max(1, vp.clientWidth), vpH = Math.max(1, vp.clientHeight);
+    canvasScale = Math.max(0.35, Math.min(1.25, Math.min((vpW - pad * 2) / w, (vpH - pad * 2) / h)));
+    canvasTx = pad + (vpW - pad * 2 - w * canvasScale) / 2 - x0 * canvasScale;
+    canvasTy = pad + (vpH - pad * 2 - h * canvasScale) / 2 - y0 * canvasScale;
+    applyCanvasTransform();
+  }
 
   function renderCanvas() {
     const host = $("canvas");
@@ -1005,9 +1073,15 @@
 
     host.innerHTML =
       '<div class="cv-toolbar">' +
-        '<button id="cvExit" class="cv-exit" type="button" title="回到板子视图">← 返回板子视图</button>' + chips +
-        '<span class="cv-hint">拖器件到画布 → 从器件端子拉线到开发板引脚</span></div>' +
-      '<div class="cv-surface">' +
+        '<button id="cvExit" class="cv-exit" type="button" title="回到板子视图">← 返回板子视图</button>' +
+        '<div class="cv-zoom">' +
+          '<button id="cvZoomOut" type="button" title="缩小">−</button>' +
+          '<span id="cvZoomLabel">100%</span>' +
+          '<button id="cvZoomIn" type="button" title="放大">＋</button>' +
+          '<button id="cvFit" type="button" title="一屏放下所有器件">适应</button>' +
+        '</div>' + chips +
+        '<span class="cv-hint">滚轮缩放 · 拖空白平移 · 从端子拉线到 GPIO</span></div>' +
+      '<div class="cv-viewport"><div class="cv-surface">' +
         '<svg class="cv-wires"></svg>' +
         '<div class="cv-board">' +
           '<div class="cv-board-head"><b>ESP32-S3-DevKitC-1</b><span>丝印与 GPIO 编号一致 · 八线 PSRAM 时 35/36/37 不可用</span></div>' +
@@ -1016,7 +1090,7 @@
             '<div class="cv-col right">' + S3_J3.map((p) => pinHtml(p, "right")).join("") + "</div>" +
           "</div>" +
         "</div>" + cards +
-      "</div>";
+      '</div></div>';
 
     // 注意：WebView2 的 CSP 会忽略 innerHTML 注入的 style 属性（cssText 解析为空），
     // 所以位置与高度必须用 CSSOM 逐个赋值，不能写进 HTML 字符串。
@@ -1030,8 +1104,11 @@
     if (boardBody) boardBody.style.height = (S3_J1.length * 16 + 8) + "px";
 
     shrinkSurface();
-    drawWires();
     bindCanvas();
+    // 必须先落定变换再算连线端点：centerIn 走 canvasLocal，依赖当前的 scale/位移。
+    applyCanvasTransform();
+    if (!canvasFitted) { canvasFitted = true; canvasFit(); }
+    drawWires();
   }
 
   function shrinkSurface() {
@@ -1083,6 +1160,47 @@
     const exitBtn = host.querySelector("#cvExit");
     if (exitBtn) exitBtn.addEventListener("click", () => setView("board"));
 
+    // 滚轮以光标为锚缩放；拖空白（含开发板背景）平移整个画布。
+    const vp = canvasViewport();
+    if (vp) {
+      vp.addEventListener("wheel", (ev) => {
+        ev.preventDefault();
+        canvasZoomAt(ev.clientX, ev.clientY, ev.deltaY < 0 ? 1.12 : 1 / 1.12);
+      }, { passive: false });
+
+      vp.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest(".cv-card, .cv-chip, .cv-pin, .cv-term, button, input, select")) return;
+        e.preventDefault();
+        const start = { x: e.clientX, y: e.clientY, tx: canvasTx, ty: canvasTy };
+        vp.classList.add("panning");
+        const move = (ev) => {
+          canvasTx = start.tx + ev.clientX - start.x;
+          canvasTy = start.ty + ev.clientY - start.y;
+          applyCanvasTransform();
+        };
+        const up = () => {
+          document.removeEventListener("pointermove", move);
+          document.removeEventListener("pointerup", up);
+          vp.classList.remove("panning");
+        };
+        document.addEventListener("pointermove", move);
+        document.addEventListener("pointerup", up);
+      });
+    }
+    const zoomButton = (id, factor) => {
+      const b = host.querySelector(id);
+      if (!b || !vp) return;
+      b.addEventListener("click", () => {
+        const r = vp.getBoundingClientRect();
+        canvasZoomAt(r.left + r.width / 2, r.top + r.height / 2, factor);
+      });
+    };
+    zoomButton("#cvZoomIn", 1.2);
+    zoomButton("#cvZoomOut", 1 / 1.2);
+    const fitBtn = host.querySelector("#cvFit");
+    if (fitBtn) fitBtn.addEventListener("click", canvasFit);
+
     // 颜色芯片 → 拖到画布添加器件
     host.querySelectorAll(".cv-chip").forEach((chip) => {
       chip.addEventListener("pointerdown", (e) => {
@@ -1096,11 +1214,13 @@
           document.removeEventListener("pointermove", move);
           document.removeEventListener("pointerup", up);
           ghost.remove();
-          const r = surface.getBoundingClientRect();
-          if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
+          const vp = canvasViewport();
+          const vr = vp ? vp.getBoundingClientRect() : { left: 0, top: 0, right: 1e9, bottom: 1e9 };
+          if (ev.clientX < vr.left || ev.clientX > vr.right || ev.clientY < vr.top || ev.clientY > vr.bottom) return;
+          const p = canvasLocal(ev.clientX, ev.clientY);
           const d = newDevice(chip.dataset.kind);
-          d._x = String(Math.max(340, ev.clientX - r.left - 94));
-          d._y = String(Math.max(8, ev.clientY - r.top - 20));
+          d._x = String(Math.max(340, Math.round(p.x - 94)));
+          d._y = String(Math.max(8, Math.round(p.y - 20)));
           devices.push(d);
           renderDevices(); renderCanvas(); saveConfig();
         };
@@ -1115,12 +1235,13 @@
       card.querySelector(".cv-card-head").addEventListener("pointerdown", (e) => {
         if (e.target.closest(".cv-del")) return;
         e.preventDefault();
-        const r = surface.getBoundingClientRect();
-        const ox = e.clientX - r.left - Number(devices[di]._x);
-        const oy = e.clientY - r.top - Number(devices[di]._y);
+        const down = canvasLocal(e.clientX, e.clientY);
+        const ox = down.x - Number(devices[di]._x);
+        const oy = down.y - Number(devices[di]._y);
         const move = (ev) => {
-          const x = Math.max(0, ev.clientX - r.left - ox);
-          const y = Math.max(0, ev.clientY - r.top - oy);
+          const p = canvasLocal(ev.clientX, ev.clientY);
+          const x = Math.max(0, p.x - ox);
+          const y = Math.max(0, p.y - oy);
           devices[di]._x = String(Math.round(x));
           devices[di]._y = String(Math.round(y));
           card.style.left = x + "px"; card.style.top = y + "px";
@@ -1154,9 +1275,8 @@
         svg.appendChild(tmp);
         let lastPin = null;
         const move = (ev) => {
-          const r = surface.getBoundingClientRect();
-          const x = ev.clientX - r.left, y = ev.clientY - r.top;
-          tmp.setAttribute("d", curve(a.x, a.y, x, y));
+          const p = canvasLocal(ev.clientX, ev.clientY);
+          tmp.setAttribute("d", curve(a.x, a.y, p.x, p.y));
           const el = document.elementFromPoint(ev.clientX, ev.clientY);
           const pin = el && el.closest ? el.closest(".cv-pin[data-gpio]") : null;
           if (pin !== lastPin) {
