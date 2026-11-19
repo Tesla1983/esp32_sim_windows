@@ -1,5 +1,7 @@
 # esp32sim desktop
 
+中文 · [English](README_EN.md)
+
 esp32sim 的 Windows 桌面启动器：选固件、点运行，在同一个窗口里看板面、串口与网络面板，改完固件自动重启。
 
 - 上游模拟器：[mikroverk/esp32sim](https://github.com/mikroverk/esp32sim) main 基线 `d043ff1`（MIT；比 v0.4.0 新 18 个提交）
