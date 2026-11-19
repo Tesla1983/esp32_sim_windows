@@ -1,0 +1,428 @@
+diff --git a/cli/src/lib.rs b/cli/src/lib.rs
+index a3a180b..9d9fa10 100644
+--- a/cli/src/lib.rs
++++ b/cli/src/lib.rs
+@@ -30,10 +30,12 @@ fn help(chip: &str, code: i32) -> ! {
+     eprintln!("                        Each bus takes only its real wiring, the trailing field being the model:");
+     eprintln!("                        I2C     BUS:ADDR:MODEL   bmp280, bmi270, bmm150, ft5x06, aht20, lsm6ds3, sh1106");
+     eprintln!("                                                 (e.g. 0:0x76:bmp280, 0:0x38:aht20, 0:0x3c:sh1106)");
++    eprintln!("                                                 BUS:ADDR:SDA:SCL:MODEL pins the part to a pad pair");
+     eprintln!("                        WS2812  PIN:LEDS:ws2812  an addressable strip on an RMT data pin");
+     eprintln!("                        SPI     SCLK:MOSI:CS:DC:st7735|ili9341  a bit-banged DCS panel");
+     eprintln!("                        SPI     SCLK:MOSI:CS:RS:nt7534|st7565  a 128x64 monochrome panel");
+     eprintln!("                        QSPI    HOST:WIDTH:HEIGHT:XOFF:co5300  a panel on a GP-SPI host");
++    eprintln!("                                HOST:WIDTH:HEIGHT:XOFF:SCLK:CS:co5300  ...wired to those pins");
+     eprintln!("  --flash-mb N, --psram-mb N   memory sizes (S3 default 8 / 2, C3, C6 and classic 4 / 0, P4 16 / 0, S31 2, mosaico 16 / 16)");
+     eprintln!("  --max-seconds S       stop after S emulated seconds (always give one: the run returns)");
+     eprintln!("  --console usb|uart0|both|none   which consoles to print (uart0 shows the ROM and bootloader)");
+diff --git a/esp-periph/src/spi_mem.rs b/esp-periph/src/spi_mem.rs
+index f64b8c8..ef3c61a 100644
+--- a/esp-periph/src/spi_mem.rs
++++ b/esp-periph/src/spi_mem.rs
+@@ -44,6 +44,13 @@ pub struct SpiMem {
+     /// (components/spi_flash/spi_flash_chip_mxic_opi.c:320-345, v5.5.5). A reset command
+     /// (RSTEN, RST) clears it.
+     pub flash_cr2: u8,
++    /// Program/erase suspended (PES). Set by flash command 0x75, cleared by 0x7A: the pair
++    /// ESP-IDF sends for CONFIG_SPI_FLASH_AUTO_SUSPEND (components/spi_flash/include/
++    /// esp_flash_chips/spi_flash_defs.h:49-50 `CMD_SUSPEND`/`CMD_RESUME`). Mirrored where the
++    /// driver looks for it: SR2 bit 7 (sus_mask 0x80, spi_flash_chip_generic_suspend_cmd_conf
++    /// at spi_flash_chip_generic.c:907-917) and SUS_STATUS bit 0 (SPI_MEM_SUS_STATUS_REG,
++    /// esp32s3 soc/spi_mem_struct.h:298 `flash_sus`).
++    pub pes: bool,
+     // Only the classic adapter opts into phase-aware quad control. Other chips retain
+     // their existing quad/octal behavior. Appended: no new state ahead of hot fields.
+     classic_quad: Option<ClassicQuad>,
+@@ -78,9 +85,40 @@ pub fn flash_jedec(octal: bool, bytes: usize) -> [u8; 3] {
+     if octal { [0xc2, 0x80, cap + 0x20] } else { [0x20, 0x40, cap] }
+ }
+ 
++/// One byte of the SFDP dump (command 0x5A). Modelled for the probe ESP-IDF performs, not as a
++/// transcription of a vendor dump: `spi_flash_chip_generic_get_caps` (spi_flash_chip_generic.c:
++/// 688-706) reads address 0x32 and treats bit 3 as "this part supports program/erase suspend",
++/// the same answer an XMC D-series part gives. `flash_jedec` above reports manufacturer 0x20,
++/// which is exactly the prefix that sends IDF down this path, so the two agree.
++///
++/// Layout follows JESD216: "SFDP" signature, revision, one parameter header pointing at 0x30,
++/// then the basic flash parameter table. Bytes outside 0x00-0x33 read as 0, which is what a real
++/// part returns for an unimplemented parameter area.
++pub fn sfdp_byte(addr: u32) -> u8 {
++    const TABLE: [u8; 0x34] = {
++        let mut t = [0u8; 0x34];
++        t[0] = b'S'; t[1] = b'F'; t[2] = b'D'; t[3] = b'P';
++        t[4] = 0x06;                    // minor revision
++        t[5] = 0x01;                    // major revision
++        t[6] = 0x01;                    // one parameter header
++        t[7] = 0xFF;                    // access protocol: legacy SPI
++        t[8] = 0x00;                    // header 0: parameter ID 0 (basic flash parameter table)
++        t[9] = 0x05;                    // minor revision 5
++        t[10] = 0x01;                   // major revision 1
++        t[11] = 0x10;                   // table length, 16 DWORDs
++        t[12] = 0x30;                   // table pointer 0x000030
++        t[15] = 0xFF;
++        t[0x30] = 0xE5;                 // BFPT DWORD0
++        t[0x31] = 0x20;
++        t[0x32] = 0x08;                 // bit 3: suspend/resume supported (the probe above)
++        t
++    };
++    TABLE.get(addr as usize).copied().unwrap_or(0)
++}
++
+ impl SpiMem {
+     pub fn new(is_spi1: bool) -> Self {
+-        let mut s = SpiMem { has_psram: true, addr_msb_aligned: false, regs: RegRam::new(), dirty: Vec::new(), w: [0; 16], pending_cmd: 0, status: 0x200, jedec: [0x20, 0x40, 0x17], is_spi1, log: false , psram_mr: [0x09, 0x0d, 0x8b, 0x00, 0x20, 0, 0, 0, 0x03], octal_flash: false, flash_cr2: 0, classic_quad: None };
++        let mut s = SpiMem { has_psram: true, addr_msb_aligned: false, regs: RegRam::new(), dirty: Vec::new(), w: [0; 16], pending_cmd: 0, status: 0x200, jedec: [0x20, 0x40, 0x17], is_spi1, log: false , psram_mr: [0x09, 0x0d, 0x8b, 0x00, 0x20, 0, 0, 0, 0x03], octal_flash: false, flash_cr2: 0, pes: false, classic_quad: None };
+         // SPI1 comes out of reset with a command phase: USER.USR_COMMAND = 1 and USER2.USR_COMMAND_BITLEN = 7
+         // (IDF v5.5.4 components/soc/esp32c3/register/soc/spi_mem_reg.h:328,438; the S3 and C6 headers agree).
+         // The C3 ROM's `esp_rom_spiflash_read` only read-modify-writes the other USER bits and the low half of
+@@ -161,7 +199,7 @@ impl SpiMem {
+             0x2c => self.status,                        // RD_STATUS
+             0x54 => 0,                                  // FSM idle
+             0x58..=0x94 => self.w[((off - 0x58) / 4) as usize],
+-            0xa4 => 0,                                  // SUS_STATUS
++            0xa4 => self.pes as u32,                     // SUS_STATUS bit 0: flash_sus
+             0x3fc => 0x2101040,
+             _ => self.regs.read(off),
+         }
+@@ -282,6 +320,16 @@ impl SpiMem {
+                 0x04 => self.status &= !0x02,                      // WRDI
+                 0x01 | 0x31 | 0x11 => self.status &= !0x02,        // WRSR*: latch consumed (keep QE set)
+                 0x15 => self.set_w_bytes(&[0x00]),
++                // RDSFDP: the SFDP dump. ESP-IDF probes byte 0x32 (JESD216 basic-flash-parameter
++                // DWORD0 bit 19) to decide whether the chip supports program/erase suspend:
++                // `spi_flash_chip_generic_get_caps` reads command 0x5A at address 0x32 and tests
++                // (data & 0x8) — components/spi_flash/spi_flash_chip_generic.c:688-706 (v6.1).
++                // Without it the capability word stays 0, `esp_flash_suspend_cmd_init` logs
++                // "Suspend and resume may not supported for this flash model yet" (esp_flash_api.c:1607)
++                // and an AUTO_SUSPEND build aborts in init_flash.
++                0x5a => { let d: Vec<u8> = (0..miso_bytes).map(|k| sfdp_byte(addr.wrapping_add(k as u32))).collect(); self.set_w_bytes(&d); }
++                0x75 => { self.pes = true; self.status |= 0x8000; }   // PES: SR2 bit 7 = suspended
++                0x7a => { self.pes = false; self.status &= !0x8000; } // PER: SR2 bit 7 cleared
+                 0x02 | 0x32 | 0x38 => { let d = self.w_bytes(mosi_bytes); for (i, b) in d.iter().enumerate() { let x = addr as usize + i; if x < fsize { flash[x] &= *b; } } self.dirty.push((DirtyMem::Flash, addr as usize, d.len())); self.status &= !0x02; }
+                 0x20 => { let a = (erase_addr as usize) & !0xfff; for b in flash.iter_mut().take((a + 0x1000).min(fsize)).skip(a) { *b = 0xff; } self.dirty.push((DirtyMem::Flash, a, 0x1000)); self.status &= !0x02; }
+                 0x52 => { let a = (erase_addr as usize) & !0x7fff; for b in flash.iter_mut().take((a + 0x8000).min(fsize)).skip(a) { *b = 0xff; } self.dirty.push((DirtyMem::Flash, a, 0x8000)); self.status &= !0x02; }
+@@ -655,4 +703,27 @@ mod tests {
+             }
+         }
+     }
++
++    /// The two device commands ESP-IDF's AUTO_SUSPEND path depends on: RDSFDP 0x5A must answer the
++    /// capability byte IDF probes at 0x32 (`spi_flash_chip_generic_get_caps`, spi_flash_chip_generic.c:
++    /// 688-706, which tests bit 3), and PES 0x75 / PER 0x7A must move the suspended state that
++    /// `spi_flash_chip_generic_suspend_cmd_conf` reads back as SR2 bit 7 (mask 0x80) and that
++    /// SUS_STATUS bit 0 reports (esp32s3 esp32s3/soc/spi_mem_struct.h:298 `flash_sus`).
++    #[test]
++    fn sfdp_reports_suspend_support_and_pes_per_track_the_device_state() {
++        let mut s = SpiMem::new(true);
++        let mut flash = vec![0xffu8; 0x400000];
++
++        assert_eq!(flash_cmd(&mut s, &mut flash, 0x5a, false, Some((0x32, 24)), &[], 1), vec![0x08]);
++        assert_eq!(flash_cmd(&mut s, &mut flash, 0x5a, false, Some((0, 24)), &[], 4), b"SFDP".to_vec());
++        assert_eq!(flash_cmd(&mut s, &mut flash, 0x5a, false, Some((0x70, 24)), &[], 1), vec![0x00]);
++
++        assert_eq!(s.read(0xa4) & 1, 0, "reset: not suspended");
++        flash_cmd(&mut s, &mut flash, 0x75, false, None, &[], 0);
++        assert_eq!(s.read(0xa4) & 1, 1, "PES sets SUS_STATUS bit 0");
++        assert_eq!((s.read(0x2c) >> 15) & 1, 1, "PES sets SR2 bit 7, the sus_mask 0x80 the driver tests");
++        flash_cmd(&mut s, &mut flash, 0x7a, false, None, &[], 0);
++        assert_eq!(s.read(0xa4) & 1, 0, "PER clears SUS_STATUS bit 0");
++        assert_eq!((s.read(0x2c) >> 15) & 1, 0, "PER clears SR2 bit 7");
++    }
+ }
+diff --git a/esp-soc/src/board.rs b/esp-soc/src/board.rs
+index bc4e14e..49acfff 100644
+--- a/esp-soc/src/board.rs
++++ b/esp-soc/src/board.rs
+@@ -180,11 +180,14 @@ impl BoardModel for NoBoard {
+ /// belong to I2C alone — the other buses are not forced into that shape.
+ ///
+ /// Parsed from `--device SPEC`, where the trailing field is always the model:
+-/// `BUS:ADDR:MODEL` (I2C, addr `0x76` or decimal `118`), `PIN:LEDS:ws2812`,
+-/// `SCLK:MOSI:CS:DC:st7735`, `HOST:WIDTH:HEIGHT:XOFF:co5300`.
++/// `BUS:ADDR:MODEL` (I2C, addr `0x76` or decimal `118`) or `BUS:ADDR:SDA:SCL:MODEL`
++/// to pin the part to a physical SDA/SCL pair, `PIN:LEDS:ws2812`,
++/// `SCLK:MOSI:CS:DC:st7735`, `HOST:WIDTH:HEIGHT:XOFF:co5300`, or
++/// `HOST:WIDTH:HEIGHT:XOFF:SCLK:CS:co5300` to pin the QSPI panel to the two
++/// wires that identify it (the clock it is shifted by and the chip select it answers to).
+ #[derive(Clone, Debug, Eq, PartialEq)]
+ pub enum DeviceSpec {
+-    I2c { bus: u8, addr: u8, model: String },
++    I2c { bus: u8, addr: u8, model: String, pins: Option<(u8, u8)> },
+     Ws2812 { pin: u8, leds: usize },
+     /// A 132×162 ST7735-family panel behind bit-banged SPI.
+     St7735 { sclk: u8, mosi: u8, cs: u8, dc: u8 },
+@@ -192,7 +195,9 @@ pub enum DeviceSpec {
+     Ili9341 { sclk: u8, mosi: u8, cs: u8, dc: u8 },
+     /// A 128×64 monochrome NT7534 LCD behind bit-banged SPI; RS high selects command or data.
+     Nt7534 { sclk: u8, mosi: u8, cs: u8, rs: u8 },
+-    Co5300 { host: u8, width: usize, height: usize, x_offset: u16 },
++    /// A QSPI AMOLED on a GP-SPI host. `pins` is the wired (SCLK, CS) pair; `None` keeps the
++    /// controller-only behaviour where any transaction on `host` reaches the panel.
++    Co5300 { host: u8, width: usize, height: usize, x_offset: u16, pins: Option<(u8, u8)> },
+ }
+ 
+ impl DeviceSpec {
+@@ -212,8 +217,9 @@ impl DeviceSpec {
+         };
+         match kind.as_str() {
+             "bmp280" | "bmi270" | "bmm150" | "ft5x06" | "aht20" | "lsm6ds3" | "sh1106" => {
+-                if fields.len() != 2 {
+-                    return Err(format!("--device: I2C needs BUS:ADDR:{kind}, got {s:?}"));
++                if fields.len() != 2 && fields.len() != 4 {
++                    return Err(format!(
++                        "--device: I2C needs BUS:ADDR:{kind} or BUS:ADDR:SDA:SCL:{kind}, got {s:?}"));
+                 }
+                 let bus = fields[0].parse::<u32>()
+                     .map_err(|_| format!("--device: bus {:?} is not a number in {s:?}", fields[0]))?;
+@@ -226,7 +232,17 @@ impl DeviceSpec {
+                 if addr == 0 || addr > 0x7f {
+                     return Err(format!("--device: I2C address {a:?} outside 7-bit range 0x03..0x77"));
+                 }
+-                Ok(DeviceSpec::I2c { bus: byte(bus, "bus")?, addr, model: kind })
++                let pins = if fields.len() == 4 {
++                    let pin = |v: &str, what: &str| -> Result<u8, String> {
++                        v.parse::<u32>()
++                            .map_err(|_| format!("--device: I2C {what} {v:?} is not a number in {s:?}"))
++                            .and_then(|n| byte(n, what))
++                    };
++                    Some((pin(fields[2], "sda")?, pin(fields[3], "scl")?))
++                } else {
++                    None
++                };
++                Ok(DeviceSpec::I2c { bus: byte(bus, "bus")?, addr, model: kind, pins })
+             }
+             "ws2812" | "sk6812" | "neopixel" => {
+                 let n = numbers(2)?;
+@@ -246,12 +262,26 @@ impl DeviceSpec {
+                 })
+             }
+             "co5300" => {
+-                let n = numbers(4)?;
++                if fields.len() != 4 && fields.len() != 6 {
++                    return Err(format!(
++                        "--device: QSPI panel needs HOST:WIDTH:HEIGHT:XOFF:co5300 or HOST:WIDTH:HEIGHT:XOFF:SCLK:CS:co5300, got {s:?}"));
++                }
++                let n = numbers(fields.len())?;
+                 if n[1] == 0 || n[1] > 1024 || n[2] == 0 || n[2] > 1024 {
+                     return Err(format!("--device: panel {}x{} outside 1..1024", n[1], n[2]));
+                 }
+                 let x_offset = u16::try_from(n[3]).map_err(|_| format!("--device: x offset {} too large", n[3]))?;
+-                Ok(DeviceSpec::Co5300 { host: byte(n[0], "host")?, width: n[1] as usize, height: n[2] as usize, x_offset })
++                let pins = if fields.len() == 6 {
++                    let sclk = byte(n[4], "sclk")?;
++                    let cs = byte(n[5], "cs")?;
++                    if sclk == cs {
++                        return Err(format!("--device: SCLK and CS cannot be the same pin ({sclk})"));
++                    }
++                    Some((sclk, cs))
++                } else {
++                    None
++                };
++                Ok(DeviceSpec::Co5300 { host: byte(n[0], "host")?, width: n[1] as usize, height: n[2] as usize, x_offset, pins })
+             }
+             _ => Err(format!("--device: unknown model {kind:?} (bmp280, bmi270, bmm150, ft5x06, aht20, lsm6ds3, sh1106, ws2812, st7735, ili9341, nt7534, co5300)")),
+         }
+@@ -272,6 +302,9 @@ pub struct ConfigurableBoard {
+     /// A QSPI panel driven by a GP-SPI host.
+     panel: Option<crate::devices::co5300::Co5300>,
+     panel_host: Option<u8>,
++    /// The (SCLK, CS) pads the QSPI panel was wired to. When set, the panel only hears a
++    /// transaction whose GPIO-matrix route actually reaches both pins.
++    panel_pins: Option<(u8, u8)>,
+     /// A 128×64 monochrome LCD on I2C; the RAM is shared so `display()` can publish it.
+     sh1106: Option<MonoRam>,
+     /// The same monochrome panel behind SPI (NT7534): its RAM, driver, bus and RS pin.
+@@ -289,6 +322,26 @@ pub struct ConfigurableBoard {
+ /// Monochrome panel RAM shared between a device (which writes it) and the board (which shows it).
+ pub type MonoRam = std::sync::Arc<std::sync::Mutex<crate::devices::MonoPanel>>;
+ 
++/// Binds a device to the physical (SDA, SCL) pads it was wired to. The controller compares this
++/// pair with its current GPIO-matrix route before answering, so a device whose lines were not
++/// actually connected stays silent (NACK) instead of responding by address alone.
++struct PinnedI2cDevice {
++    inner: Box<dyn I2cDevice>,
++    pins: (u8, u8),
++}
++
++impl I2cDevice for PinnedI2cDevice {
++    fn address(&self, configured: u8) -> u8 { self.inner.address(configured) }
++    fn start_address(&mut self, configured: u8, address: u8, read: bool) -> bool {
++        self.inner.start_address(configured, address, read)
++    }
++    fn pins(&self) -> Option<(u8, u8)> { Some(self.pins) }
++    fn start(&mut self, read: bool) -> bool { self.inner.start(read) }
++    fn write(&mut self, b: u8) -> bool { self.inner.write(b) }
++    fn read(&mut self) -> u8 { self.inner.read() }
++    fn stop(&mut self) { self.inner.stop() }
++}
++
+ /// A display a bare board can show, in the order the page lays the panels out.
+ #[derive(Clone, Copy, PartialEq, Eq)]
+ enum PanelSlot { Co5300, Tft, Nt7534, Sh1106 }
+@@ -313,6 +366,7 @@ impl ConfigurableBoard {
+         let mut board = ConfigurableBoard {
+             specs, motion: std::sync::Arc::new(crate::devices::imu_motion::ImuMotion::default()),
+             tft: None, tft_label: "ST7735 (SPI)", bitbang: None, dc_pin: None, panel: None, panel_host: None,
++            panel_pins: None,
+             sh1106: None, nt7534: None, nt7534_driver: None, nt7534_spi: None, nt7534_rs: None,
+             strips: Vec::new(), gpio_events: 0, spi_tx_log: Vec::new(),
+         };
+@@ -331,9 +385,10 @@ impl ConfigurableBoard {
+                     board.bitbang = Some(crate::devices::SpiBitBang::new(sclk, mosi, cs));
+                     board.dc_pin = Some(dc);
+                 }
+-                DeviceSpec::Co5300 { host, width, height, x_offset } => {
++                DeviceSpec::Co5300 { host, width, height, x_offset, pins } => {
+                     board.panel = Some(crate::devices::co5300::Co5300::new(width, height, x_offset));
+                     board.panel_host = Some(host);
++                    board.panel_pins = pins;
+                 }
+                 DeviceSpec::Nt7534 { sclk, mosi, cs, rs } => {
+                     let ram = mono_ram();
+@@ -437,12 +492,31 @@ impl BoardModel for ConfigurableBoard {
+             let take = data.len().min(64);
+             self.spi_tx_log.push((host, data[..take].to_vec()));
+         }
++        // A panel pinned to physical wires is fed by `spi_transfer_pins` only: this path has no
++        // route information, so it must not reach the panel behind the owner's back.
++        if self.panel_pins.is_some() { return; }
+         if self.panel_host == Some(host) {
+             if let Some(panel) = self.panel.as_mut() { panel.transaction(data); }
+         }
+     }
+-    fn spi_transfer(&mut self, host: u8, tx: &[u8], rx_len: usize) -> Vec<u8> {
+-        self.spi_tx(host, tx);
++
++    /// Opt in to route decoding only when a panel was actually wired to pins.
++    fn uses_spi_pins(&self) -> bool { self.panel_pins.is_some() }
++
++    fn spi_transfer_pins(&mut self, host: u8, pins: SpiPins, tx: &[u8], rx_len: usize) -> Vec<u8> {
++        let Some((sclk, cs)) = self.panel_pins else {
++            return self.spi_transfer(host, tx, rx_len);
++        };
++        if self.spi_tx_log.len() < 256 {
++            let take = tx.len().min(64);
++            self.spi_tx_log.push((host, tx[..take].to_vec()));
++        }
++        // Same rule as an I2C device's `pins()`: the controller only talks to what the GPIO
++        // matrix currently routes to. A wire that was never drawn leaves the panel dark.
++        let on_panel_wires = pins.sclk & (1u64 << sclk) != 0 && pins.cs & (1u64 << cs) != 0;
++        if self.panel_host == Some(host) && on_panel_wires {
++            if let Some(panel) = self.panel.as_mut() { panel.transaction(tx); }
++        }
+         vec![0xff; rx_len]
+     }
+ 
+@@ -450,7 +524,7 @@ impl BoardModel for ConfigurableBoard {
+         use crate::devices;
+         let pts: devices::Ft5x06Points = std::sync::Arc::new(std::sync::Mutex::new([None; devices::ft5x06::FT5X06_POINTS]));
+         self.specs.iter().filter_map(|s| match s {
+-            DeviceSpec::I2c { bus, addr, model } => {
++            DeviceSpec::I2c { bus, addr, model, pins } => {
+                 let dev: Box<dyn I2cDevice> = match model.as_str() {
+                     "bmp280" => Box::new(devices::Bmp280::new()),
+                     "bmi270" => Box::new(devices::Bmi270::new(self.motion.clone(), 1_000_000)),
+@@ -464,6 +538,11 @@ impl BoardModel for ConfigurableBoard {
+                     }
+                     other => unreachable!("model {other} validated in DeviceSpec::parse"),
+                 };
++                // 带 SDA/SCL 的器件只在控制器的 GPIO 矩阵路由正好落到这对引脚时才应答。
++                let dev = match pins {
++                    Some(pair) => Box::new(PinnedI2cDevice { inner: dev, pins: *pair }) as Box<dyn I2cDevice>,
++                    None => dev,
++                };
+                 Some((*bus, *addr, dev))
+             }
+             _ => None,
+@@ -577,25 +656,41 @@ mod configurable_tests {
+     #[test]
+     fn parses_each_bus_into_its_own_shape() {
+         assert_eq!(DeviceSpec::parse("0:0x76:bmp280").unwrap(),
+-                   DeviceSpec::I2c { bus: 0, addr: 0x76, model: "bmp280".into() });
++                   DeviceSpec::I2c { bus: 0, addr: 0x76, model: "bmp280".into(), pins: None });
+         assert_eq!(DeviceSpec::parse("1:118:BMP280").unwrap(),
+-                   DeviceSpec::I2c { bus: 1, addr: 0x76, model: "bmp280".into() });
++                   DeviceSpec::I2c { bus: 1, addr: 0x76, model: "bmp280".into(), pins: None });
+         assert_eq!(DeviceSpec::parse("8:12:ws2812").unwrap(),
+                    DeviceSpec::Ws2812 { pin: 8, leds: 12 });
+         assert_eq!(DeviceSpec::parse("2:1:41:40:st7735").unwrap(),
+                    DeviceSpec::St7735 { sclk: 2, mosi: 1, cs: 41, dc: 40 });
+         assert_eq!(DeviceSpec::parse("2:368:448:16:co5300").unwrap(),
+-                   DeviceSpec::Co5300 { host: 2, width: 368, height: 448, x_offset: 16 });
++                   DeviceSpec::Co5300 { host: 2, width: 368, height: 448, x_offset: 16, pins: None });
++        assert_eq!(DeviceSpec::parse("2:368:448:16:11:12:co5300").unwrap(),
++                   DeviceSpec::Co5300 { host: 2, width: 368, height: 448, x_offset: 16, pins: Some((11, 12)) });
+         assert_eq!(DeviceSpec::parse("0:0x38:aht20").unwrap(),
+-                   DeviceSpec::I2c { bus: 0, addr: 0x38, model: "aht20".into() });
++                   DeviceSpec::I2c { bus: 0, addr: 0x38, model: "aht20".into(), pins: None });
+         assert_eq!(DeviceSpec::parse("1:0x6a:lsm6ds3").unwrap(),
+-                   DeviceSpec::I2c { bus: 1, addr: 0x6a, model: "lsm6ds3".into() });
++                   DeviceSpec::I2c { bus: 1, addr: 0x6a, model: "lsm6ds3".into(), pins: None });
+         assert_eq!(DeviceSpec::parse("2:1:41:40:ili9341").unwrap(),
+                    DeviceSpec::Ili9341 { sclk: 2, mosi: 1, cs: 41, dc: 40 });
+         assert_eq!(DeviceSpec::parse("0:0x3c:sh1106").unwrap(),
+-                   DeviceSpec::I2c { bus: 0, addr: 0x3c, model: "sh1106".into() });
++                   DeviceSpec::I2c { bus: 0, addr: 0x3c, model: "sh1106".into(), pins: None });
+         assert_eq!(DeviceSpec::parse("2:1:41:40:nt7534").unwrap(),
+                    DeviceSpec::Nt7534 { sclk: 2, mosi: 1, cs: 41, rs: 40 });
++        assert_eq!(DeviceSpec::parse("0:0x76:8:9:bmp280").unwrap(),
++                   DeviceSpec::I2c { bus: 0, addr: 0x76, model: "bmp280".into(), pins: Some((8, 9)) });
++    }
++
++    #[test]
++    fn i2c_devices_carry_their_wired_pins() {
++        let specs = vec![
++            DeviceSpec::parse("0:0x76:8:9:bmp280").unwrap(),
++            DeviceSpec::parse("1:0x3c:sh1106").unwrap(),
++        ];
++        let mut board = ConfigurableBoard::new(specs);
++        let devs = board.i2c_devices();
++        assert_eq!(devs[0].2.pins(), Some((8, 9)), "a pinned part reports its SDA/SCL pads");
++        assert_eq!(devs[1].2.pins(), None, "the legacy two-field form stays unpinned");
+     }
+ 
+     #[test]
+@@ -606,6 +701,9 @@ mod configurable_tests {
+         assert!(DeviceSpec::parse("8:ws2812").is_err(), "ws2812 needs a pin and a led count");
+         assert!(DeviceSpec::parse("2:1:41:st7735").is_err(), "st7735 needs four pins");
+         assert!(DeviceSpec::parse("2:0:448:16:co5300").is_err(), "a panel needs a non-zero width");
++        assert!(DeviceSpec::parse("2:368:448:16:11:co5300").is_err(), "pins come as a SCLK/CS pair");
++        assert!(DeviceSpec::parse("2:368:448:16:11:11:co5300").is_err(), "one pin cannot be both");
++        assert!(DeviceSpec::parse("0:0x76:8:bmp280").is_err(), "three fields is neither form");
+     }
+ 
+     #[test]
+@@ -646,6 +744,33 @@ mod configurable_tests {
+         assert_eq!(board.display().map(|d| (d.0, d.1)), Some((368, 448)));
+     }
+ 
++    #[test]
++    fn qspi_panel_only_hears_its_own_wires() {
++        let specs = vec![DeviceSpec::parse("2:368:448:16:11:12:co5300").unwrap()];
++        let mut board = ConfigurableBoard::new(specs);
++        // A pinned panel opts in to route decoding, like a pin-bound I2C device.
++        assert!(board.uses_spi_pins());
++
++        let ramwr = [0x02u8, 0x00, 0x2c, 0x00];
++        let wired = SpiPins { sclk: 1 << 11, cs: 1 << 12, ..Default::default() };
++        board.spi_transfer_pins(2, wired, &ramwr, 0);
++        assert_eq!(board.display_frames(), 1, "SCLK 11 + CS 12 is the panel's own pair");
++
++        // Same host, but the clock is routed to another pad: nothing reaches the panel.
++        let wrong_sclk = SpiPins { sclk: 1 << 4, cs: 1 << 12, ..Default::default() };
++        board.spi_transfer_pins(2, wrong_sclk, &ramwr, 0);
++        assert_eq!(board.display_frames(), 1, "a different clock pin leaves the panel silent");
++
++        // Chip select never asserted (route has no CS pin) is the same story.
++        let no_cs = SpiPins { sclk: 1 << 11, cs: 0, ..Default::default() };
++        board.spi_transfer_pins(2, no_cs, &ramwr, 0);
++        assert_eq!(board.display_frames(), 1, "no asserted chip select means no transaction");
++
++        // The route-less callback must not bypass the wiring either.
++        board.spi_transfer(2, &ramwr, 0);
++        assert_eq!(board.display_frames(), 1, "the pin-less path cannot reach a pinned panel");
++    }
++
+     #[test]
+     fn bit_banged_panel_decodes_dc_and_clocked_bytes() {
+         let specs = vec![DeviceSpec::parse("2:1:41:40:st7735").unwrap()];

@@ -243,26 +243,30 @@
   .cv-wires { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 
   .cv-board {
-    position: absolute; left: 22px; top: 20px; width: 268px;
+    position: absolute; left: 20px; top: 8px; width: 300px;
     border-radius: 12px; background: #10151c; border: 1px solid #2a3444;
   }
-  .cv-board-head { padding: 9px 12px 4px; }
+  .cv-board-head { padding: 7px 12px 3px; }
   .cv-board-head b { font-size: 12.5px; font-weight: 500; color: #e6eaf2; }
-  .cv-board-head span { display: block; font-size: 10.5px; color: #6b7385; margin-top: 2px; }
-  .cv-board-body { position: relative; padding: 6px 0 10px; }
+  .cv-board-head span { display: block; font-size: 10px; color: #6b7385; margin-top: 1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cv-board-body { position: relative; padding: 4px 0 6px; }
   .cv-col { position: absolute; top: 6px; width: 104px; }
   .cv-col.left { left: 8px; }
   .cv-col.right { right: 8px; }
   .cv-row {
-    position: relative; height: 26px; display: flex; align-items: center;
-    font-family: Consolas, monospace; font-size: 10.5px; color: #aeb6c6;
+    position: relative; height: 16px; display: flex; align-items: center;
+    font-family: Consolas, monospace; font-size: 10px; color: #aeb6c6;
   }
-  .cv-col.left .cv-row { justify-content: flex-end; padding-right: 16px; }
-  .cv-col.right .cv-row { justify-content: flex-start; padding-left: 16px; }
+  .cv-col.left .cv-row { justify-content: flex-end; padding-right: 14px; }
+  .cv-col.right .cv-row { justify-content: flex-start; padding-left: 14px; }
   .cv-pin {
     position: absolute; width: 10px; height: 10px; border-radius: 50%;
     background: #39414f; border: 1px solid #4a5464; cursor: crosshair;
+    z-index: 2;
   }
+  /* 丝印文字不抢指针：落点必须命中圆点，否则从器件拖过来的线会"掉在字上"而失败。 */
+  .cv-row > span:not(.cv-pin) { pointer-events: none; }
   .cv-col.left .cv-pin { right: 0; }
   .cv-col.right .cv-pin { left: 0; }
   .cv-pin.io { background: #2b3a2f; border-color: #3ecf8e; }
@@ -352,7 +356,7 @@
         </select>
       </label>
       <div id="devicesBox" style="display:none;">
-        <div class="hint">裸板上没有预设外设，接线按真实总线给：I2C 填总线+地址，灯带填数据脚，屏填 SPI 引脚或 host+尺寸。填完可切到右侧「引脚图」检查连线。</div>
+        <div class="hint">裸板上没有预设外设，接线按真实总线给：I2C 填总线+地址，灯带填数据脚，屏填 SPI 引脚或 host+尺寸。填完可切到右侧「引脚图」检查连线；在「接线画布」上连线后，I2C 与 QSPI 会按物理引脚过滤。</div>
         <div id="deviceRows"></div>
         <div class="row">
           <select id="newKind" style="flex:1;margin-top:0;"></select>
@@ -471,7 +475,7 @@
     { v: "st7735", label: "ST7735 屏（SPI）",  bus: "spi",  def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
     { v: "ili9341", label: "ILI9341 屏 2.4″（SPI）", bus: "spi", def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
     { v: "nt7534", label: "NT7534 单色屏 3.5″（SPI）", bus: "spi", def: { sclk: "2", mosi: "1", cs: "41", dc: "40" } },
-    { v: "co5300", label: "CO5300 屏（QSPI）", bus: "qspi", def: { host: "2", width: "368", height: "448", xoff: "16" } },
+    { v: "co5300", label: "CO5300 屏（QSPI）", bus: "qspi", def: { host: "2", width: "368", height: "448", xoff: "16", sclk: "", cs: "" } },
   ];
   const kindDef = (kind) => DEVICE_KINDS.find((k) => k.v === kind) || DEVICE_KINDS[0];
   const isI2c = (kind) => kindDef(kind).bus === "i2c";
@@ -658,6 +662,12 @@
           err.textContent = "CO5300 需要有效 SPI host（0–48）和 1–1024 的宽高。";
           return false;
         }
+        // SCLK/CS 同样是可选接线：没连 = 按 host 应答的旧行为；连了就要成对且互不相同。
+        if ((d.sclk || d.cs) && (!isPin(d.sclk) || !isPin(d.cs) || String(d.sclk) === String(d.cs))) {
+          err.textContent = "CO5300 的 SCLK / CS 要成对连接到两条不同的有效引脚（0–48）。";
+          return false;
+        }
+        if (isPin(d.cs) && !claim(d.cs, name + " CS")) return false;
       }
     }
     err.textContent = "";
@@ -673,6 +683,8 @@
       }
       if (bus === "gpio") return [d.pin, d.leds, d.kind].join(":");
       if (bus === "spi") return [d.sclk, d.mosi, d.cs, d.dc, d.kind].join(":");
+      // 连过 SCLK/CS 才下发引脚，内核据此判断事务是否真的落到这块屏上。
+      if (isPin(d.sclk) && isPin(d.cs)) return [d.host, d.width, d.height, d.xoff, d.sclk, d.cs, d.kind].join(":");
       return [d.host, d.width, d.height, d.xoff, d.kind].join(":");
     });
   }
@@ -692,7 +704,14 @@
       { label: "CS", pin: d.cs, key: "cs" },
       { label: d.kind === "nt7534" ? "RS" : "DC", pin: d.dc, key: "dc" },
     ];
-    if (bus === "qspi") return [{ label: "QSPI host " + d.host, target: "qspi" + d.host, key: "host" }];
+    if (bus === "qspi") {
+      // 连了线就画到具体 GPIO；没连则退回到 host 节点（旧行为）。
+      if (isPin(d.sclk) && isPin(d.cs)) return [
+        { label: "SCLK", pin: d.sclk, key: "sclk" },
+        { label: "CS", pin: d.cs, key: "cs" },
+      ];
+      return [{ label: "QSPI host " + d.host, target: "qspi" + d.host, key: "host" }];
+    }
     if (bus === "i2c") return [{ label: "SDA / SCL · bus " + d.bus, sub: d.addr, target: "i2c" + d.bus, key: "addr" }];
     return [];
   }
@@ -888,6 +907,8 @@
       { key: "sclk", role: "SCLK" }, { key: "mosi", role: "MOSI" },
       { key: "cs", role: "CS" }, { key: "dc", role: d.kind === "nt7534" ? "RS" : "DC" },
     ];
+    // QSPI 屏只认能定位到它的两根线：时钟与片选（数据 4 线由 host 宽度决定，不逐脚建模）。
+    if (bus === "qspi") return [{ key: "sclk", role: "SCLK" }, { key: "cs", role: "CS" }];
     return [];
   }
 
@@ -895,7 +916,7 @@
     let i = 0;
     devices.forEach((d) => {
       if (d._x == null || d._x === "" || d._y == null || d._y === "") {
-        d._x = String(320 + (i % 3) * 210);
+        d._x = String(352 + (i % 3) * 210);
         d._y = String(24 + Math.floor(i / 3) * 168);
       }
       i++;
@@ -959,7 +980,13 @@
           "</select></div>" +
           '<div class="cv-addr"><span>地址</span><input data-dev="' + di + '" data-field="addr" value="' + esc(d.addr || "") + '" placeholder="0x76"></div>';
       } else if (kindDef(d.kind).bus === "qspi") {
-        extra = '<div class="cv-note">QSPI 由 host 直连建模，无需逐脚连线。</div>';
+        const h = String(d.host === "3" ? "3" : "2");
+        extra =
+          '<div class="cv-addr"><span>Host</span><select data-dev="' + di + '" data-field="host">' +
+            '<option value="2"' + (h === "2" ? " selected" : "") + ">SPI2</option>" +
+            '<option value="3"' + (h === "3" ? " selected" : "") + ">SPI3</option>" +
+          "</select></div>" +
+          '<div class="cv-note">连上 SCLK / CS 后，只有事务真的落到这两个脚，屏才有反应。</div>';
       }
       return '<div class="cv-card" data-dev="' + di + '">' +
         '<div class="cv-card-head"><b>' + esc(label) + '</b><button type="button" class="small cv-del">×</button></div>' +
@@ -989,7 +1016,7 @@
       c.style.top = Number(d._y) + "px";
     });
     const boardBody = host.querySelector(".cv-board-body");
-    if (boardBody) boardBody.style.height = (S3_J1.length * 26 + 16) + "px";
+    if (boardBody) boardBody.style.height = (S3_J1.length * 16 + 8) + "px";
 
     shrinkSurface();
     drawWires();
@@ -1057,7 +1084,7 @@
           const r = surface.getBoundingClientRect();
           if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
           const d = newDevice(chip.dataset.kind);
-          d._x = String(Math.max(300, ev.clientX - r.left - 94));
+          d._x = String(Math.max(340, ev.clientX - r.left - 94));
           d._y = String(Math.max(8, ev.clientY - r.top - 20));
           devices.push(d);
           renderDevices(); renderCanvas(); saveConfig();
@@ -1164,6 +1191,12 @@
     surface.querySelectorAll(".cv-addr select").forEach((sel) => {
       sel.addEventListener("change", () => {
         const d = devices[Number(sel.dataset.dev)];
+        // QSPI 卡片这里选的是 GP-SPI host，不是 I2C 总线。
+        if (sel.dataset.field === "host") {
+          d.host = sel.value === "3" ? "3" : "2";
+          renderDevices(); renderCanvas(); saveConfig();
+          return;
+        }
         d.bus = sel.value === "1" ? "1" : "0";
         // 换总线后地址可能与新总线上的器件冲突，自动顺延到空闲地址。
         const free = nextFreeAddr(d.bus, d.addr);

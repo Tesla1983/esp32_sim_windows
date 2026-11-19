@@ -41,11 +41,20 @@ esp32sim 的 Windows 桌面启动器：选固件、点运行，在同一个窗�
 ```powershell
 git clone https://github.com/mikroverk/esp32sim.git vendor/esp32sim
 git -C vendor/esp32sim checkout d043ff1dd3e53aca18a23f4f2b18bfb038a57667
+git -C vendor/esp32sim apply patches\vendor-esp32sim-local.patch
 powershell -ExecutionPolicy Bypass -File scripts\build-sidecar.ps1
 node scripts\stage-web.cjs
 cd src-tauri
 cargo tauri build
 ```
+
+`vendor/esp32sim/` 不入库，本地对内核的改动统一放在 `patches/vendor-esp32sim-local.patch`，
+上面第 3 步 `git apply` 就是把这些改动打回去。补丁基线是 fork 的 `3a81c3b`（含 `--buslog`），
+在干净检出上已验证可应用。当前补丁内容：
+
+- 裸板 `--device` 的 I2C 形式支持 `BUS:ADDR:SDA:SCL:MODEL`，器件按物理引脚过滤（线没接就不应答）
+- 裸板 `--device` 的 QSPI 形式支持 `HOST:WIDTH:HEIGHT:XOFF:SCLK:CS:co5300`，事务必须落到这两根线
+- SPI flash 的 suspend/resume（0x75/0x7A）与 SFDP 探测，避免 IDF 开自动挂起后启动断言
 
 产物：
 

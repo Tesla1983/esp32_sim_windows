@@ -38,8 +38,8 @@ Desktop.ini
 /PLAN.md
 # 文档与验收记录（含 E:\ 绝对路径、截图、本机环境）
 /docs/
-# 补丁导出的邮件头含作者邮箱
-/patches/
+# 补丁统一用 git diff 导出（无邮件头/作者信息）；format-patch 的 mbox 不发布
+/patches/*.mbox
 # Espressif mask ROM，不随仓库分发
 /roms/
 # 验收 / 诊断脚本硬编码了本机绝对路径
