@@ -200,6 +200,25 @@
   #log::-webkit-scrollbar-corner { background: #12151c; }
   #log .ln.err { color: #f09595; }
   #log .ln.warn { color: #f5c775; }
+  /* 阶段一：只读引脚连线图 */
+  #viewTabs {
+    position: absolute; top: 8px; right: 8px; z-index: 4;
+    display: flex; gap: 6px;
+  }
+  #viewTabs button { padding: 4px 11px; font-size: 11.5px; background: rgba(23,26,33,.92); }
+  #viewTabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #pinmap {
+    position: absolute; inset: 0; display: none; overflow: auto;
+    padding: 8px; background: #0b0d11; scrollbar-width: thin;
+    scrollbar-color: #3a4152 #12151c;
+  }
+  /* 宽度铺满、按 viewBox 原比例给高度；器件多时靠纵向滚动，保证文字可读不缩小。 */
+  #pinmap.fit { display: block; overflow: auto; }
+  #pinmap.fit svg { width: 100%; height: auto; max-width: 100%; }
+  #pinmap svg { display: block; }
+  .pm-empty { color: var(--muted); font-size: 13px; line-height: 1.8; padding: 34px 28px; text-align: center; }
+  .pm-hit { cursor: pointer; }
+  .pm-hit:hover { fill: rgba(55,138,221,.14); }
 </style>
 </head>
 <body>
@@ -243,7 +262,7 @@
         </select>
       </label>
       <div id="devicesBox" style="display:none;">
-        <div class="hint">裸板上没有预设外设，接线按真实总线给：I2C 填总线+地址，灯带填数据脚，屏填 SPI 引脚或 host+尺寸。</div>
+        <div class="hint">裸板上没有预设外设，接线按真实总线给：I2C 填总线+地址，灯带填数据脚，屏填 SPI 引脚或 host+尺寸。填完可切到右侧「引脚图」检查连线。</div>
         <div id="deviceRows"></div>
         <div class="row">
           <select id="newKind" style="flex:1;margin-top:0;"></select>
@@ -319,6 +338,11 @@
     <div id="banner" class="banner"></div>
     <div id="boardWrap">
       <iframe id="boardFrame" title="board"></iframe>
+      <div id="viewTabs">
+        <button id="tabBoard" class="active" type="button">板子视图</button>
+        <button id="tabPins" type="button">引脚图</button>
+      </div>
+      <div id="pinmap"></div>
       <div id="placeholder">
         <div>配置固件后点击「运行」</div>
         <div class="hint">首次使用需要 mask ROM：放到项目 roms/ 目录，或让程序从 ESP-IDF 的 esp-rom-elfs 目录自动查找。</div>
@@ -360,6 +384,7 @@
   const kindDef = (kind) => DEVICE_KINDS.find((k) => k.v === kind) || DEVICE_KINDS[0];
   const isI2c = (kind) => kindDef(kind).bus === "i2c";
   let devices = [];
+  let pinView = false;
 
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const kindOptions = (sel) => DEVICE_KINDS.map((k) => '<option value="' + k.v + '"' + (sel === k.v ? " selected" : "") + ">" + k.label + "</option>").join("");
@@ -471,6 +496,7 @@
     });
     $("devicesBox").style.display = $("board").value === "custom" ? "block" : "none";
     validateDevices();
+    if (pinView) renderPinmap();
   }
   const isPin = (v) => /^\d+$/.test(String(v)) && Number(v) <= 48;
   const isPosInt = (v, max) => /^\d+$/.test(String(v)) && Number(v) >= 1 && Number(v) <= max;
@@ -522,6 +548,160 @@
       if (bus === "gpio") return [d.pin, d.leds, d.kind].join(":");
       if (bus === "spi") return [d.sclk, d.mosi, d.cs, d.dc, d.kind].join(":");
       return [d.host, d.width, d.height, d.xoff, d.kind].join(":");
+    });
+  }
+
+  // ---- 阶段一：只读引脚连线图 ----
+  // 把当前 devices 画成「芯片 + 连线 + 器件卡」。连线只读，点线会聚焦左侧对应输入框改数字。
+  const BUS_COLOR = { i2c: "#378add", gpio: "#ef9f27", spi: "#3ecf8e", qspi: "#b48ef0" };
+  const BUS_NAME = { i2c: "I2C", gpio: "GPIO", spi: "SPI", qspi: "QSPI" };
+
+  /// 一个器件占用哪些「端口」。有物理引脚的返回 pin，总线型返回 target（总线节点 id）。
+  function devicePorts(d) {
+    const bus = kindDef(d.kind).bus;
+    if (bus === "gpio") return [{ label: "DIN", pin: d.pin, key: "pin" }];
+    if (bus === "spi") return [
+      { label: "SCLK", pin: d.sclk, key: "sclk" },
+      { label: "MOSI", pin: d.mosi, key: "mosi" },
+      { label: "CS", pin: d.cs, key: "cs" },
+      { label: d.kind === "nt7534" ? "RS" : "DC", pin: d.dc, key: "dc" },
+    ];
+    if (bus === "qspi") return [{ label: "QSPI host " + d.host, target: "qspi" + d.host, key: "host" }];
+    if (bus === "i2c") return [{ label: "SDA / SCL · bus " + d.bus, sub: d.addr, target: "i2c" + d.bus, key: "addr" }];
+    return [];
+  }
+
+  function renderPinmap() {
+    const host = $("pinmap");
+    if ($("board").value !== "custom") {
+      host.innerHTML = '<div class="pm-empty">引脚图只对「custom 裸板 + 自由搭配器件」绘制。<br>在左侧把板子切到 custom 并添加器件后，这里会按真实总线画出芯片与器件的连线。</div>';
+      return;
+    }
+    if (!devices.length) {
+      host.innerHTML = '<div class="pm-empty">还没有器件。在左侧「添加器件」后，这里会画出连线。</div>';
+      return;
+    }
+
+    const padX = 40, topY = 56;
+    const chipX = padX, chipW = 156;
+    const cardX = 420, cardW = 226;
+    const chipRowH = 26, cardRowH = 24, cardGap = 14, cardHead = 32, cardPad = 12;
+
+    // 收集芯片侧的节点：先实体 GPIO（升序去重），再总线节点（I2C0/1、QSPI host）。
+    const pinSet = new Set();
+    const busOrder = [];
+    const busSeen = new Set();
+    devices.forEach((d) => {
+      const bus = kindDef(d.kind).bus;
+      devicePorts(d).forEach((p) => {
+        if (p.pin != null && isPin(p.pin)) pinSet.add(Number(p.pin));
+      });
+      const t = bus === "i2c" ? "i2c" + d.bus : bus === "qspi" ? "qspi" + d.host : null;
+      if (t && !busSeen.has(t)) { busSeen.add(t); busOrder.push({ id: t, bus, port: devicePorts(d)[0] }); }
+    });
+    const pins = [...pinSet].sort((a, b) => a - b);
+
+    const chipRows = [
+      ...pins.map((pin) => ({ id: "gpio" + pin, kind: "pin", label: "GPIO " + pin, pin })),
+      ...busOrder.map((b) => ({
+        id: b.id, kind: "bus", bus: b.bus, sub: b.port.sub,
+        // 两条 I2C 总线都要能区分，否则同名的 SDA/SCL 节点会混淆。
+        label: b.bus === "i2c" ? ("I2C" + b.id.slice(3) + " SDA/SCL") : b.port.label,
+      })),
+    ];
+
+    // 芯片侧每个节点的 y
+    const chipY = {};
+    chipRows.forEach((r, i) => { chipY[r.id] = topY + 44 + i * chipRowH + 12; });
+    const chipH = 44 + chipRows.length * chipRowH + 16;
+
+    // 器件卡布局
+    let cy = topY;
+    const cards = devices.map((d) => {
+      const ports = devicePorts(d);
+      const h = cardHead + ports.length * cardRowH + cardPad;
+      const card = { d, ports, y: cy, h };
+      cy += h + cardGap;
+      return card;
+    });
+    const totalH = Math.max(cy, topY + chipH) + 52;
+
+    const parts = [];
+    // 不给 width/height 属性，交给 CSS（#pinmap.fit svg）按容器等比缩放；
+    // preserveAspectRatio 保证超高时整体缩小而不是裁切。
+    parts.push('<svg viewBox="0 0 680 ' + totalH + '" preserveAspectRatio="xMidYMid meet" fill="none" xmlns="http://www.w3.org/2000/svg">');
+
+    // 芯片外框
+    parts.push('<rect x="' + chipX + '" y="' + topY + '" width="' + chipW + '" height="' + chipH + '" rx="12" fill="#171a21" stroke="#2a2f3a" stroke-width="0.5"/>');
+    parts.push('<text x="' + (chipX + chipW / 2) + '" y="' + (topY + 24) + '" fill="#e6eaf2" font-size="13" font-weight="500" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, sans-serif">ESP32-S3</text>');
+    parts.push('<text x="' + (chipX + chipW / 2) + '" y="' + (topY + 40) + '" fill="#8b93a7" font-size="11" text-anchor="middle" font-family="Segoe UI, Microsoft YaHei, sans-serif">' + chipRows.length + ' 个接线端点</text>');
+
+    // 连线（先画线，再画卡片，避免线压字）
+    cards.forEach((card, di) => {
+      const bus = kindDef(card.d.kind).bus;
+      const color = BUS_COLOR[bus] || "#8b93a7";
+      card.ports.forEach((p, pi) => {
+        const targetId = p.pin != null ? "gpio" + p.pin : p.target;
+        const y1 = chipY[targetId];
+        if (y1 == null) return;
+        const x1 = chipX + chipW;
+        const y2 = card.y + cardHead + pi * cardRowH + cardRowH / 2;
+        const x2 = cardX;
+        const mx = (x1 + x2) / 2;
+        parts.push('<path d="M ' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2 + '" stroke="' + color + '" stroke-width="1.5" opacity="0.85"/>');
+        parts.push('<circle cx="' + x1 + '" cy="' + y1 + '" r="3.5" fill="' + color + '"/>');
+        parts.push('<circle cx="' + x2 + '" cy="' + y2 + '" r="3.5" fill="' + color + '"/>');
+      });
+    });
+
+    // 芯片侧节点标签
+    chipRows.forEach((r) => {
+      const y = chipY[r.id];
+      const color = r.kind === "pin" ? "#8b93a7" : (BUS_COLOR[r.bus] || "#8b93a7");
+      parts.push('<circle cx="' + (chipX + chipW) + '" cy="' + y + '" r="3.5" fill="' + color + '"/>');
+      parts.push('<text x="' + (chipX + chipW - 10) + '" y="' + (y + 4) + '" fill="#c8cfdd" font-size="11.5" text-anchor="end" font-family="Consolas, monospace">' + esc(r.label) + '</text>');
+    });
+
+    // 器件卡
+    cards.forEach((card, di) => {
+      const bus = kindDef(card.d.kind).bus;
+      const color = BUS_COLOR[bus] || "#8b93a7";
+      parts.push('<g class="pm-hit" data-dev="' + di + '">');
+      parts.push('<rect x="' + cardX + '" y="' + card.y + '" width="' + cardW + '" height="' + card.h + '" rx="10" fill="#1d212a" stroke="' + color + '" stroke-width="1" opacity="0.95"/>');
+      parts.push('<rect x="' + cardX + '" y="' + card.y + '" width="4" height="' + card.h + '" rx="2" fill="' + color + '"/>');
+      parts.push('<text x="' + (cardX + 14) + '" y="' + (card.y + 20) + '" fill="#e6eaf2" font-size="12" font-weight="500" font-family="Segoe UI, Microsoft YaHei, sans-serif">' + esc(kindDef(card.d.kind).label) + '</text>');
+      parts.push('<text x="' + (cardX + cardW - 12) + '" y="' + (card.y + 20) + '" fill="' + color + '" font-size="10.5" text-anchor="end" font-family="Segoe UI, Microsoft YaHei, sans-serif">' + BUS_NAME[bus] + '</text>');
+      card.ports.forEach((p, pi) => {
+        const y = card.y + cardHead + pi * cardRowH + cardRowH / 2;
+        const right = p.pin != null ? ("GPIO " + p.pin) : (p.sub ? ("地址 " + p.sub) : "");
+        parts.push('<text x="' + (cardX + 14) + '" y="' + (y + 4) + '" fill="#aeb6c6" font-size="11.5" font-family="Segoe UI, Microsoft YaHei, sans-serif">' + esc(p.label) + '</text>');
+        if (right) parts.push('<text x="' + (cardX + cardW - 12) + '" y="' + (y + 4) + '" fill="#8b93a7" font-size="11" text-anchor="end" font-family="Consolas, monospace">' + esc(right) + '</text>');
+        parts.push('<rect class="pm-line" data-dev="' + di + '" data-key="' + esc(p.key) + '" x="' + cardX + '" y="' + (y - cardRowH / 2) + '" width="' + cardW + '" height="' + cardRowH + '" fill="transparent"/>');
+      });
+      parts.push('</g>');
+    });
+
+    // 图例
+    const legendY = totalH - 26;
+    let lx = chipX;
+    Object.keys(BUS_NAME).forEach((b) => {
+      const used = devices.some((d) => kindDef(d.kind).bus === b);
+      if (!used) return;
+      parts.push('<circle cx="' + lx + '" cy="' + legendY + '" r="4" fill="' + BUS_COLOR[b] + '"/>');
+      parts.push('<text x="' + (lx + 9) + '" y="' + (legendY + 4) + '" fill="#8b93a7" font-size="11" font-family="Segoe UI, Microsoft YaHei, sans-serif">' + BUS_NAME[b] + '</text>');
+      lx += 64;
+    });
+    parts.push('<text x="' + (680 - padX) + '" y="' + (legendY + 4) + '" fill="#5c6478" font-size="10.5" text-anchor="end" font-family="Segoe UI, Microsoft YaHei, sans-serif">点器件行可跳到左侧输入框修改</text>');
+    parts.push('</svg>');
+    host.innerHTML = parts.join('');
+
+    host.querySelectorAll(".pm-line").forEach((el) => {
+      el.addEventListener("click", () => {
+        const row = $("deviceRows").children[Number(el.dataset.dev)];
+        if (!row) return;
+        const input = row.querySelector('[data-key="' + el.dataset.key + '"]');
+        if (input) { input.focus(); input.select && input.select(); input.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+      });
     });
   }
 
@@ -592,6 +772,26 @@
     renderDevices();
     saveConfig();
   });
+
+  // 视图切换：板子（iframe）/ 引脚图。引脚图只读，不改变仿真与表单。
+  function setView(pins) {
+    pinView = pins;
+    $("tabBoard").classList.toggle("active", !pins);
+    $("tabPins").classList.toggle("active", pins);
+    // 用 .fit 控制显示（flex + 缩放）；内联 display 会盖过类样式，故不设内联。
+    $("pinmap").classList.toggle("fit", pins);
+    if (pins) {
+      $("boardFrame").style.display = "none";
+      $("placeholder").style.display = "none";
+      renderPinmap();
+    } else {
+      // 回到板子视图时按运行状态恢复，和 startSim/stopSim 的显示逻辑保持一致。
+      $("boardFrame").style.display = running ? "block" : "none";
+      $("placeholder").style.display = running ? "none" : "flex";
+    }
+  }
+  $("tabBoard").addEventListener("click", () => setView(false));
+  $("tabPins").addEventListener("click", () => setView(true));
   $("devDynamics").addEventListener("change", saveConfig);
   $("autoWatch").addEventListener("change", () => {
     saveConfig();
@@ -704,6 +904,8 @@
       $("placeholder").style.display = "none";
       $("boardFrame").style.display = "block";
       $("boardFrame").src = "http://127.0.0.1:" + port + "/?embed=1";
+      // 若当前停在引脚图，启动后仍保持在引脚图（不把画布顶掉）。
+      if (pinView) setView(true);
       $("btnStop").disabled = false;
       $("btnRun").disabled = false;   // 运行中允许再次点击：内部会先停旧进程
       setStatus("运行中", "on");
@@ -726,7 +928,7 @@
     currentPort = 0;
     $("boardFrame").src = "about:blank";
     $("boardFrame").style.display = "none";
-    $("placeholder").style.display = "flex";
+    if (pinView) { renderPinmap(); } else { $("placeholder").style.display = "flex"; }
     $("btnRun").disabled = false;
     $("btnStop").disabled = true;
     if (!silent) {
